@@ -68,11 +68,11 @@ To illustrate the model's practical utility, we scored two hypothetical leads:
 - **Sarah** (Production Manager, Medical Device, Americas, P1 - Contact Us, SEO): **97.2%** predicted conversion probability — 7.52x above baseline
 - **David** (QA Director, Unknown industry, APAC, No Priority, Online Ads): **2.5%** predicted conversion probability — 0.19x baseline
 
-At a 0.10 probability threshold, the model identifies approximately 105 conversions per 1,000 leads pursued. At an average MX contract value of $70,000, that represents roughly $7.3 million in expected lifetime revenue per 1,000 leads, with outreach costs that are almost negligible in comparison even at $1,000 per lead.
+At a 0.10 probability threshold, the model identifies approximately 105 conversions per 1,000 leads pursued. At an average MX contract value of $70,000, that represents over $7 million in expected lifetime revenue per 1,000 leads, with outreach costs that are almost negligible in comparison even at $1,000 outreach cost per pursued lead.
 
 Increasing the MX progression rate from 12.7% to 16-18% would represent a ~50% improvement in MX sales success and meaningfully close the gap with QX.
 
-<img src="https://github.com/corinnc/is6813/blob/main/cost_table.png" width="450">
+<img src="https://github.com/corinnc/is6813/blob/main/cost_table.png" width="650">
 
 ## Personal Contribution
 My contributions to this project were:
