@@ -72,7 +72,7 @@ At a 0.10 probability threshold, the model identifies approximately 105 conversi
 
 Increasing the MX progression rate from 12.7% to 16-18% would represent a ~50% improvement in MX sales success and meaningfully close the gap with QX.
 
-<img src="https://github.com/corinnc/is6813/blob/main/cost_table.png" width="650">
+<img src="https://github.com/corinnc/is6813/blob/main/cost_table.png" width="850">
 
 ## Personal Contribution
 My contributions to this project were:
