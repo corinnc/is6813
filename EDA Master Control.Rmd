@@ -1,0 +1,2181 @@
+---
+title: "EDA Master Control"
+author: "Josh, Joel, Corinn, Gaby"
+date: "2026-02-17"
+format:
+  html:
+    toc: true
+    toc-depth: 3
+    toc-location: left
+    toc-title: "Contents"
+    embed-resources: true
+execute:
+  include: true
+  eval: true
+  warning: false
+  message: false
+editor: 
+  markdown: 
+    wrap: sentence
+---
+
+# Introduction
+
+### Business Problem
+
+MasterControl is a SaaS provider offering two core software suites: *QX (Quality Solutions)* and *MX (Manufacturing Solutions)*.
+While QX has over 20 years of market maturity, MX is a newer offering launched approximately four years ago.
+MX currently underperforms QX with a 12.7% lead progression rate, compared to 19.7% for QX.
+Leadership believes the current targeting strategy results in sales pursuing leads that are less likely to convert, creating missed opportunities and inefficient resource allocation.
+
+### Analytic Problem
+
+Our analytic task is to identify the **industries**, **company characteristics**, and **job titles** associated with higher MX progression rates.
+The target variable is **Lead Outcome**, where a lead is considered successful if it reached **SQL**, **SQO**, or **Won**.
+
+The goal of EDA is to:\
+- Understand the structure and quality of the data\
+- Examine relationships between lead attributes and Lead Outcome\
+- Identify which features appear predictive and should be prioritized in modeling\
+- Detect missingness, inconsistency, and outlier behavior
+
+### Scope
+
+The output of this project will be recommendations for: - Which industries to target\
+- Which job titles represent high-value decision makers\
+- How Marketing and Sales can prioritize outreach for the MX product\
+- Improvements to prospect data-capture on the MasterControl website
+
+Predicting churn or customer retention is **out of scope**.
+
+### Success Metrics
+
+-   **Primary metric:** Lead progression rate (SQL/SQO/Won)\
+-   **Goal:** Increase MX progression from **12.7% → 16–18%**, moving toward the QX benchmark of 19.7%
+
+Success means enabling MasterControl Sales to focus on high-potential profiles that historically progress at above-average rates.
+
+### Project Management
+
+Team members include **Corinn, Josh, Joel, and Gaby**, meeting weekly with the following milestones:\
+- Feb 1 — Business problem statement finalized\
+- Feb 22 — EDA complete\
+- Mar 22 — Modeling & evaluation\
+- Apr 8 — Final presentation
+
+------------------------------------------------------------------------
+
+### Questions to Guide EDA
+
+1.  **Data Quality**
+    -   What variables exist? How many leads?\
+    -   Are job titles and industry columns clean or messy?\
+    -   Which variables have missing values?\
+    -   Is the missing data random, or does it follow a pattern?
+    -   Are there any duplicate leads?
+2.  **Target Variable**
+    -   What is the overall MX success rate?\
+    -   Is the target imbalanced?
+3.  **Job Titles**
+    -   Which job title patterns (e.g., Director, Manager, Engineer) appear most in converted leads?\
+    -   Which technical/manufacturing roles convert best?
+4.  **Industry**
+    -   Which industries show the highest conversion rates?\
+    -   Are specific NAICS groups highly predictive?\
+    -   Can differences between conversion rates of the products be explained by industry differences?
+5.  **Account Characteristics**
+    -   Do company size, revenue, or region relate to successful MX outcomes?
+6.  **Interactions**
+    -   Do specific title + industry combinations show high conversion?
+7.  **Modeling Implications**
+    -   Which variables look most promising?\
+    -   Which variables need transformations or cleaning?
+
+# Data Exploration
+
+### Setup
+
+```{r Setup, warning=FALSE}
+
+# install.packages
+pacman::p_load(tidyverse,stringr,tidytext,quanteda,quanteda.textplots,janitor,skimr,recipes,
+               cluster,factoextra,FactoMineR,proxy,dendextend,pheatmap,Rtsne,fpc)
+```
+
+### Load Data
+
+```{r Load Data, warning=FALSE}
+
+# Load Data
+leads <- read_csv("Mastercontrol QAL Performance.csv")
+
+
+# Basic structure
+dim(leads)
+glimpse(leads)
+
+# Clean column names for easier coding
+leads <- clean_names(leads)
+names(leads)
+
+# Quick preview
+head(leads)
+
+# Basic summary statistics
+summary(leads)
+
+# Check missing values 
+colSums(is.na(leads))
+
+#view data set
+#view(leads)
+
+# Check for duplicate rows by qal_id
+sum(duplicated(leads$qal_id))
+
+# Check which leads are duplicated
+leads$qal_id[duplicated(leads$qal_id)]
+
+```
+
+### Dataset Overview
+
+The leads dataset contains 16,815 rows and 14 columns.
+Each row represents a Qualified Account Lead (QAL) for MasterControl.
+After cleaning column names, the primary fields fall into the following categories:
+
+**Account / site context:**
+
+-   **acct_primary_site_function:** describes the primary activity at the customer site (e.g., Food and beverage, Small-molecule API, Sterile injectables).\
+-   **acct_manufacturing_model:** indicates how manufacturing is managed (e.g., Consumer Packaged Goods, In-House, Hospital/Investor model).\
+-   **acct_target_industry:** the industry segment of the account (e.g., Pharma & BioTech, Medical Device, Non-Life Science).
+
+**Contact-level information:**
+
+-   **contact_lead_title:** the job title of the lead or contact (e.g., QA Manager, VP Quality & Regulatory Affairs).\
+-   **contact_lead_id:** identifier for the individual contact; may repeat if a person is tied to multiple QAL records.
+
+**QAL identifiers and lead outcomes:**
+
+-   **qal_id:** unique identifier for the QAL record.\
+-   **next_stage_c:** the lead outcome or progression stage (e.g., SQL, SQO, Won, Recycled). This is our target variable identifier. This will be converted into a binary success indicator for modeling.
+
+**Account segmentation and territory:**
+
+-   **acct_territory_rollup:** geographic region (Americas, EMEA, APAC & Oceania).\
+-   **acct_tier_rollup:** account size/tier (Small, Medium, Large), useful for segmentation.
+
+**Product and marketing channel:**
+
+-   **solution:** specific MasterControl product family engaged (Mx, Qx, Ax, Logbooks).\
+-   **solution_rollup:** product family grouping used to distinguish MX from QX.\
+-   **last_tactic_campaign_channel:** most recent marketing touchpoint (e.g., Email, Online Ads, Outbound Prospecting).
+
+**Time**
+
+-   **qal_cohort_date:** date when the QAL entered the pipeline, ranging from early 2024 to early 2026.
+
+All variables except the cohort date are categorical and will be treated as factors during modeling.
+The dataset includes a mix of account attributes, contact information, product engagement, and progression outcomes—providing multiple angles to explore what drives higher MX success.
+There are 0 duplicated leads in the dataset, meaning every qal_id is unique, therefore no leads were imputed twice and will only be counted once in analysis.
+The next step is to evaluate missingness and data quality across these fields to understand how each variable will behave in downstream analysis.
+
+### Missing Data
+
+```{r }
+
+# Count missing values per column
+missing_values <- leads %>%
+  summarise(across(everything(), ~ sum(is.na(.)))) %>%
+  pivot_longer(cols = everything(),
+               names_to = "variable",
+               values_to = "n_missing") %>%
+  mutate(
+    pct_missing = 100 * n_missing / nrow(leads)
+  ) %>%
+  arrange(desc(pct_missing))
+
+missing_values
+
+```
+
+#### Missing Data Overview
+
+The dataset contains several fields with notable missingness.
+The table below shows the number and percentage of missing values for each variable.
+Three variables have substantial missingness:
+
+-   **acct_primary_site_function — 40.9% missing**\
+-   **acct_manufacturing_model — 40.9% missing**\
+-   **contact_lead_title — 38.1% missing**
+
+These three variables represent important account and contact attributes.
+Their high level of missingness suggests that many QAL records lack basic information about what the site does, how it manufactures, or who the contact person is.
+Because job titles are central to this project, the missingness in contact_lead_title will be especially important in modeling and may require grouping into an "Unknown" category.
+
+Moderate missingness appears in:
+
+-   **next_stage_c — 2.87% missing**\
+    These records have no known lead outcome and will be excluded when computing success rates.
+
+-   **acct_territory_rollup — 0.79% missing**
+
+Low missingness (less than 0.3%) appears in:
+
+-   **acct_target_industry (45 missing)**
+-   **acct_tier_rollup (45 missing)**
+-   **contact_lead_id (3 missing)**
+
+These complete variables can be used reliably for segmentation and cohort-based analysis.
+
+Overall, the missing data pattern indicates that contact and site-level details are inconsistently collected, while product, territory, and outcome fields are much more complete.
+For modeling, we will likely need to consolidate missing categories rather than impute them, since these fields represent high-cardinality categorical attributes.
+
+#### Verify Missing Values
+
+According to the data dictionary, the percentage of missing information across variables is minimal, with the exception of job titles.
+Specifically, the documentation reports:
+
+-   **contact/lead title:** 29.21% missing\
+-   \*\*next_stage\_\_c:\*\* 2.37% missing\
+-   **acct_territory_rollup:** 0.79% missing\
+-   **acct_manufacturing_model:** 0.61% missing\
+-   **acct_primary_site_function:** 0.36% missing\
+-   **All other variables:** less than 0.3% missing
+
+Based on this documentation, account-level variables such as industry, manufacturing model, and site function are expected to be highly complete and reliable for segmentation analysis.
+
+To validate these assumptions, we will verify whether the dataset used in this analysis reflects the same missingness levels reported in the data dictionary.
+
+```{r create-na-summary,  echo=FALSE, include=FALSE}
+na_summary <- leads %>%
+  summarise(across(everything(), ~ sum(is.na(.)))) %>%
+  pivot_longer(everything(), names_to = "variable", values_to = "n_missing") %>%
+  mutate(pct_missing = round(100 * n_missing / nrow(leads), 2)) %>%
+  arrange(desc(pct_missing))
+
+na_summary
+```
+
+```{r verify-missing-data}
+
+# Check blank strings (optional)
+sum(leads$acct_primary_site_function == "", na.rm = TRUE)
+sum(leads$acct_manufacturing_model == "", na.rm = TRUE)
+
+dict_missing <- tibble::tribble(
+  ~variable, ~dict_pct_missing,
+  "contact_lead_title", 29.21,
+  "next_stage_c", 2.37,
+  "acct_territory_rollup", 0.79,
+  "acct_manufacturing_model", 0.61,
+  "acct_primary_site_function", 0.36,
+  "acct_tier_rollup", 0.27,
+  "acct_target_industry", 0.27,
+  "contact_lead_id", 0.02
+)
+
+compare_missing <- na_summary %>%
+  left_join(dict_missing, by = "variable") %>%
+  mutate(diff_pct = round(pct_missing - dict_pct_missing, 2)) %>%
+  arrange(desc(pct_missing))
+
+compare_missing
+
+
+```
+
+##### Results
+
+The results show that there are no blank string values in either acct_primary_site_function or acct_manufacturing_model.
+This confirms that missing information in these variables is recorded as NA rather than empty strings.
+
+As shown in the table comparison, the observed levels of missingness differ substantially from those reported in the data dictionary.
+
+#### Veracity of the data
+
+Some variables include placeholder categories such as “Not Enough Info Found” and “Unknown,” which reflect incomplete classification rather than true missing data.
+These will be treated as explicit categories in the analysis to evaluate whether incomplete enrichment affects lead progression.
+
+```{r not-enough-unknown}
+
+#unique_labels <- lapply(leads %>% select(where(is.character)), function(x) sort(unique(x)))
+#unique_labels
+
+counts_not_enough_unknown <- leads %>%
+  select(where(is.character)) %>%
+  pivot_longer(everything(), names_to = "variable", values_to = "value") %>%
+  filter(!is.na(value)) %>%
+  filter(str_detect(str_to_lower(value), "not.*enough|enough.*info|unknown")) %>%
+  count(variable, value, sort = TRUE) %>%
+  group_by(variable) %>%
+  mutate(pct = round(100 * n / nrow(leads), 2)) %>%
+  ungroup()
+
+counts_not_enough_unknown
+
+
+```
+
+In addition to true NA values, some variables contain placeholder categories like “Not Enough Info Found” and “Unknown.” These don’t represent simple data entry gaps, but rather cases where the system could not properly classify the account.
+Combined with the high percentage of NA values, this suggests that account-level information is not fully complete in this dataset.
+Since missingness itself may be meaningful, these categories will be treated explicitly in the analysis rather than removed.
+
+### Analyzing Missing Data
+
+##### Missingness vs. Lead Progression (Success Rate by Product)
+
+In this section, we test whether **missing enrichment fields** are associated with lower lead progression (i.e., whether missingness is **random** or acts as a **signal** of lead quality).
+
+First, we restrict the dataset to leads with a **known outcome** (`next_stage_c`) so we can compute success rates reliably.
+We then create a binary target variable, `success`, where leads that reached **SQL, SQO, or Won** are labeled `1` and all other outcomes are labeled `0`.
+
+Next, we create indicator flags that capture whether key enrichment fields are missing: site function (`site_missing`), manufacturing model (`mfg_missing`), and job title (`title_missing`), plus a combined flag (`site_or_mfg_missing`) that identifies leads missing either site or manufacturing information.
+
+Finally, we summarize the **count of leads** and the **success rate** for missing vs not-missing groups, broken out by `solution_rollup` (Mx, Qx, Ax), and visualize the results to compare progression rates across products and missingness conditions.
+
+```{r Analyzing Missing Data}
+
+
+# Keep only rows with a known outcome, and create binary success target
+leads_clean <- leads %>%
+  filter(!is.na(next_stage_c)) %>%
+  mutate(success = if_else(next_stage_c %in% c("SQL","SQO","Won"), 1, 0))
+
+# Create missingness flags for the key enrichment fields (plus combined flag)
+leads_clean_flags <- leads_clean %>%
+  mutate(
+    site_missing        = is.na(acct_primary_site_function),
+    mfg_missing         = is.na(acct_manufacturing_model),
+    title_missing       = is.na(contact_lead_title),
+    site_or_mfg_missing = site_missing | mfg_missing
+  )
+
+# Reshape to long format and compute counts + success rates
+missingness_results <- leads_clean_flags %>%
+  pivot_longer(
+    cols = c(site_missing, mfg_missing, site_or_mfg_missing, title_missing),
+    names_to = "missing_type",
+    values_to = "missing_flag"
+  ) %>%
+  group_by(solution_rollup, missing_type, missing_flag) %>%
+  summarise(
+    n = n(),
+    success_rate = round(mean(success) * 100, 2),
+    .groups = "drop"
+  ) %>%
+  arrange(solution_rollup, missing_type, desc(missing_flag))
+
+plot_df <- missingness_results %>%
+  filter(missing_type %in% c("site_or_mfg_missing", "title_missing")) %>%
+  mutate(
+    missing_flag = if_else(missing_flag, "Missing", "Not missing"),
+    missing_type = recode(
+      missing_type,
+      "site_or_mfg_missing" = "Site OR Manufacturing Missing",
+      "title_missing" = "Job Title Missing"
+    )
+  )
+
+plot_df
+
+ggplot(plot_df, aes(x = solution_rollup, y = success_rate, fill = missing_flag)) +
+  geom_col(position = "dodge") +
+  geom_text(aes(label = paste0("n=", n)),
+            position = position_dodge(width = 0.9),
+            vjust = -0.3, size = 3) +
+  facet_wrap(~ missing_type) +
+  labs(
+    title = "Lead Progression Rate by Missing Enrichment",
+    x = "Solution Rollup",
+    y = "Success Rate (%)",
+    fill = ""
+  ) +
+  theme_minimal()
+
+```
+
+##### Interpretation of Output
+
+Missing enrichment is **strongly linked to lower progression**, especially for **site function + manufacturing model**.
+
+-   **MX:** `site_or_mfg_missing` = TRUE → **0.88%** (n=1,360) vs FALSE → **18.84%** (n=2,765).\
+    `title_missing` = TRUE → **8.89%** (n=1,158) vs FALSE → **14.49%** (n=2,967).
+
+-   **QX:** `site_or_mfg_missing` = TRUE → **1.23%** (n=5,291) vs FALSE → **34.95%** (n=6,889).\
+    `title_missing` = TRUE → **12.90%** (n=5,025) vs FALSE → **25.51%** (n=7,155).
+
+-   **AX:** large differences but **very small n (13–14)** → interpret cautiously.
+
+**Conclusion:** missingness is **not random** and should be kept as a **signal** (use missingness flags or explicit “Missing/Unknown” categories in modeling).
+
+#### **Find a pattern with missing data**
+
+##### MX Only: Where True Missingness Clusters
+
+###### Composition of NA-Missing Leads by Channel, Tier, Territory, and Industry
+
+In this section, we focus specifically on **MX leads** to understand whether missing enrichment fields follow a consistent pattern.
+We first restrict the data to records with a **known outcome** (`next_stage_c`) so success rates are comparable, then create a binary `success` indicator (SQL/SQO/Won = 1, otherwise = 0).
+Next, we define two missingness flags: `site_or_mfg_missing` (missing either site function or manufacturing model) and `title_missing` (missing job title).
+
+Using these flags, we compare the composition of the missing vs not-missing groups across key categorical dimensions—**marketing channel**, **account tier**, **territory**, and **target industry**—by calculating within-group percentages.
+This helps identify where missingness is concentrated (e.g., specific channels or industries), and provides evidence that missing values may reflect systematic differences in lead source or profile rather than random data entry gaps.
+
+```{r NA Sample Pattern}
+mx_miss <- leads %>%
+  filter(!is.na(next_stage_c)) %>%
+  mutate(success = if_else(next_stage_c %in% c("SQL","SQO","Won"), 1, 0)) %>%
+  filter(solution_rollup == "Mx") %>%
+  mutate(
+    site_or_mfg_missing = is.na(acct_primary_site_function) | is.na(acct_manufacturing_model),
+    title_missing = is.na(contact_lead_title)
+  )
+
+# Pattern: NA group mix by channel (top 10)
+mx_miss %>%
+  group_by(site_or_mfg_missing, last_tactic_campaign_channel) %>%
+  summarise(n = n(), .groups="drop") %>%
+  group_by(site_or_mfg_missing) %>%
+  mutate(pct = round(100 * n / sum(n), 2)) %>%
+  arrange(site_or_mfg_missing, desc(pct)) %>%
+  slice_head(n = 10)
+
+# Pattern: NA group mix by tier
+mx_miss %>%
+  group_by(site_or_mfg_missing, acct_tier_rollup) %>%
+  summarise(n = n(), .groups="drop") %>%
+  group_by(site_or_mfg_missing) %>%
+  mutate(pct = round(100 * n / sum(n), 2)) %>%
+  arrange(site_or_mfg_missing, desc(pct))
+
+# Visualization
+mx_miss %>%
+  group_by(site_or_mfg_missing, last_tactic_campaign_channel) %>%
+  summarise(n = n(), .groups="drop") %>%
+  group_by(site_or_mfg_missing) %>%
+  mutate(pct = n / sum(n)) %>%
+  ggplot(aes(x = reorder(last_tactic_campaign_channel, pct), y = pct, fill = site_or_mfg_missing)) +
+  geom_col(position = "dodge") +
+  coord_flip() +
+  labs(
+    title = "MX: Channel composition for leads with vs without Site/Manufacturing missing",
+    x = "Last Tactic Campaign Channel",
+    y = "Share within group",
+    fill = "Site/Mfg Missing"
+  ) +
+  theme_minimal()
+
+#  Pattern: NA group mix by territory (MX)
+mx_miss %>%
+  group_by(site_or_mfg_missing, acct_territory_rollup) %>%
+  summarise(n = n(), .groups="drop") %>%
+  group_by(site_or_mfg_missing) %>%
+  mutate(pct = round(100 * n / sum(n), 2)) %>%
+  arrange(site_or_mfg_missing, desc(pct))
+
+# Pattern: NA group mix by target industry (MX) - top 10
+mx_miss %>%
+  group_by(site_or_mfg_missing, acct_target_industry) %>%
+  summarise(n = n(), .groups="drop") %>%
+  group_by(site_or_mfg_missing) %>%
+  mutate(pct = round(100 * n / sum(n), 2)) %>%
+  arrange(site_or_mfg_missing, desc(pct)) %>%
+  slice_head(n = 10)
+
+
+
+
+```
+
+##### Interpretation of the Output (MX)
+
+Missing site/manufacturing enrichment in **MX** is **not random**.
+When this info is missing, leads are more likely to be **Small tier** (32.94% vs 16.60%) and more likely to come from **digital/inbound channels** (Online Ads, SEO, Direct/Inbound, Directory Listing), while being less associated with **Email/External Demand Gen**.
+
+Missingness also varies by **region and industry**: the missing group is **less concentrated in the Americas** (49.04% vs 55.08%) and more in **EMEA** (28.53% vs 22.24%).
+The strongest pattern is **industry**—missing leads are much more likely to be **Non-Life Science** (50.96% vs 13.35%) and less likely to be **Pharma & BioTech** or **Medical Device**.
+
+**Conclusion:** These missing values are not happening by accident.
+For MX leads, “missing site/manufacturing info” shows up more often in certain types of leads:
+
+-   smaller accounts
+
+-   leads coming from digital/inbound channels (online ads, SEO, direct/inbound, directory)
+
+-   leads from EMEA more than the Americas
+
+-   leads in Non-Life Science more than Pharma & BioTech or Medical Device
+
+This matters because it means “missing” is telling us something about the lead itself and how it entered the system.
+In practice, missing enrichment can be treated like a warning sign that the lead may be lower quality or less well-qualified, or that the channel/source collects less complete information.
+
+#### **MX Only: Where Low-Enrichment (“Low Info”) Clusters**
+
+##### Composition of Low-Info Leads Using NA + Placeholder Values
+
+In this section, we expand the definition of “missing” enrichment beyond true `NA` values.
+For two key fields—`acct_primary_site_function` and `acct_manufacturing_model`.We create a **Low Info** indicator that captures both:
+
+-   **True missing values (`NA`)**, and
+
+-   **Placeholder values** that represent incomplete enrichment (e.g., "Unknown", "Not Enough Info Found", "MISSING/BLANK", or empty strings).
+
+Then we focus only on MX leads with a known outcome, and we compare the composition of the Low Info group vs the not Low Info group across:
+
+-   marketing channel (last_tactic_campaign_channel)
+
+-   account tier (acct_tier_rollup)
+
+-   territory (acct_territory_rollup)
+
+-   target industry (acct_target_industry)
+
+```{r Pattern Check Including Low Info Bucket (MX)}
+
+mx_lowinfo <- leads %>%
+  filter(!is.na(next_stage_c)) %>%
+  mutate(success = if_else(next_stage_c %in% c("SQL","SQO","Won"), 1, 0)) %>%
+  filter(solution_rollup == "Mx") %>%
+  mutate(
+    # define "low info" as NA OR placeholders
+    site_lowinfo =
+      is.na(acct_primary_site_function) |
+      str_to_lower(str_trim(acct_primary_site_function)) %in% c("unknown", "not enough info found", "missing/blank", ""),
+    mfg_lowinfo =
+      is.na(acct_manufacturing_model) |
+      str_to_lower(str_trim(acct_manufacturing_model)) %in% c("unknown", "not enough info found", "missing/blank", ""),
+    site_or_mfg_lowinfo = site_lowinfo | mfg_lowinfo
+  )
+
+# 1) Channel mix
+mx_lowinfo %>%
+  group_by(site_or_mfg_lowinfo, last_tactic_campaign_channel) %>%
+  summarise(n = n(), .groups="drop") %>%
+  group_by(site_or_mfg_lowinfo) %>%
+  mutate(pct = round(100 * n / sum(n), 2)) %>%
+  arrange(site_or_mfg_lowinfo, desc(pct)) %>%
+  slice_head(n = 10)
+
+# 2) Tier mix
+mx_lowinfo %>%
+  group_by(site_or_mfg_lowinfo, acct_tier_rollup) %>%
+  summarise(n = n(), .groups="drop") %>%
+  group_by(site_or_mfg_lowinfo) %>%
+  mutate(pct = round(100 * n / sum(n), 2)) %>%
+  arrange(site_or_mfg_lowinfo, desc(pct))
+
+# 3) Territory mix
+mx_lowinfo %>%
+  group_by(site_or_mfg_lowinfo, acct_territory_rollup) %>%
+  summarise(n = n(), .groups="drop") %>%
+  group_by(site_or_mfg_lowinfo) %>%
+  mutate(pct = round(100 * n / sum(n), 2)) %>%
+  arrange(site_or_mfg_lowinfo, desc(pct))
+
+# 4) Target industry mix (top 10)
+mx_lowinfo %>%
+  group_by(site_or_mfg_lowinfo, acct_target_industry) %>%
+  summarise(n = n(), .groups="drop") %>%
+  group_by(site_or_mfg_lowinfo) %>%
+  mutate(pct = round(100 * n / sum(n), 2)) %>%
+  arrange(site_or_mfg_lowinfo, desc(pct)) %>%
+  slice_head(n = 10)
+```
+
+#### Conclusion
+
+For MX, “Low Info” enrichment is a meaningful signal.
+It is more common for:
+
+-   smaller accounts
+
+-   digital/inbound channels (Online Ads, SEO, Directory Listing)
+
+-   EMEA compared to the Americas
+
+-   Non-Life Science accounts (much higher share than in the complete-enrichment group)
+
+Because these differences are large (especially by industry), we should not treat missing/placeholder values as random noise.
+Instead, we can keep a Low Info flag as a feature and/or combine missing/placeholder categories into a consistent Low Info level for modeling.
+
+### Contact Lead Title - Additional Cleaning Steps
+
+Before we do any in depth cleaning and standardization, we start by checking to see the number of unique and missing values for contact_lead_title field.
+
+This field is free form entry, therefore this field has a huge variation in job titles.
+In future modeling, this will create additional noise and difficulty in interpretation.
+
+```{r}
+
+leads |>
+  summarise(n = n(), n_unique = n_distinct(contact_lead_title),
+            n_missing = sum(is.na(contact_lead_title) | contact_lead_title == ""))
+```
+
+**Unique Contact Lead Titles**
+
+There are 5,791 unique contact lead titles within the dataset.
+The goal is to reduce the number of unique values to make grouping/clustering simpler for further analysis.
+
+#### Pre-Processing Cleaning
+
+Pre-processing steps are completed to reduce the number of unique values.
+This includes removing punctuation or special characters, numbers, errant spacing, converting to lower case and removing stop words.
+
+```{r}
+#remove special characters
+leads <- leads |> mutate(
+  contact_lead_title = contact_lead_title |>
+    str_to_lower() |>
+    str_replace_all("[^a-z\\s]", "") |>
+    str_replace_all("\\s+", " ") |>
+    str_trim()
+)
+
+stop_words_vec <- tidytext::stop_words$word
+
+leads <- leads |>
+  mutate(
+    contact_lead_title = map_chr(
+      contact_lead_title,
+      ~ if (is.na(.x)) {
+          NA_character_ #preserves NA values for now instead of turning to a string with value of NA
+        } else {
+          words <- str_split(.x, " ")[[1]]
+          paste(words[!words %in% stop_words_vec], collapse = " ")
+        }
+    )
+  )
+
+```
+
+After this cleaning, we see the number of unique is still quite high, with an improvement of about 8% (445 values).
+
+```{r}
+
+leads |>
+  summarise(n = n(), n_unique = n_distinct(contact_lead_title),
+            n_missing = sum(is.na(contact_lead_title) | contact_lead_title == ""))
+```
+
+**Pre-Processing Cleaning Output** The number of unique values decreased from 5,791 to 5,346.
+There needs futher cleaning and or title grouping to lower this value.
+
+#### Common Contact Title Groupings
+
+To try and further reduce the number of unique values, AI was leveraged to come up with a map of common abbreviations and typing errors.
+This value map was then applied to the data, replacing the values where they occurred.
+
+```{r}
+title_map <- c(
+  # --- common misspellings / normalization ---
+  "cheif" = "chief",
+  "chif" = "chief",
+  "cheif executive officer" = "chief executive officer",
+  "chief exec officer" = "chief executive officer",
+  "chief exec" = "chief executive officer",
+  "chief executive" = "chief executive officer",
+  "chief operating" = "chief operating officer",
+  "chief financial" = "chief financial officer",
+  "chief technology" = "chief technology officer",
+  "chief information" = "chief information officer",
+  "chief marketing" = "chief marketing officer",
+  "chief revenue" = "chief revenue officer",
+  "chief product" = "chief product officer",
+  "chief people" = "chief people officer",
+  "chief customer" = "chief customer officer",
+  "chief legal" = "chief legal officer",
+  "chief compliance" = "chief compliance officer",
+  "chief risk" = "chief risk officer",
+  "chief security" = "chief security officer",
+  "chief data" = "chief data officer",
+  "chief analytics" = "chief analytics officer",
+
+  "manger" = "manager",
+  "mngr" = "manager",
+  "managr" = "manager",
+  "dirctor" = "director",
+  "directer" = "director",
+  "v p" = "vice president",
+  "svp" = "senior vice president",
+  "evp" = "executive vice president",
+  "avp" = "assistant vice president",
+  "vpres" = "vice president",
+  "vice pres" = "vice president",
+  "vice-president" = "vice president",
+
+  "asst" = "assistant",
+  "assitant" = "assistant",
+  "assisstant" = "assistant",
+  "assoc" = "associate",
+  "assc" = "associate",
+  "sr" = "senior",
+  "s r" = "senior",
+  "snr" = "senior",
+  "senr" = "senior",
+  "jr" = "junior",
+  "j r" = "junior",
+  "jnr" = "junior",
+  "lead" = "lead",
+  "principal" = "principal",
+  "prinicipal" = "principal",
+  "pricipal" = "principal",
+  "staff" = "staff",
+  "intern" = "intern",
+  "trainee" = "trainee",
+  "apprentice" = "apprentice",
+
+  # --- founders / ownership ---
+  "co founder" = "cofounder",
+  "co-founder" = "cofounder",
+  "cofounder" = "cofounder",
+  "founder" = "founder",
+  "owner" = "owner",
+  "proprietor" = "owner",
+  "partner" = "partner",
+  "managing partner" = "managing partner",
+
+  # --- C-suite acronyms (expand) ---
+  "ceo" = "chief executive officer",
+  "coo" = "chief operating officer",
+  "cfo" = "chief financial officer",
+  "cto" = "chief technology officer",
+  "cio" = "chief information officer",
+  "cmo" = "chief marketing officer",
+  "cro" = "chief revenue officer",
+  "cpo" = "chief product officer",
+  "cdo" = "chief data officer",              # sometimes "chief digital officer"—watch ambiguity
+  "cso" = "chief security officer",          # sometimes "chief strategy officer"—watch ambiguity
+  "chro" = "chief human resources officer",
+  "clo" = "chief legal officer",
+  "cco" = "chief compliance officer",        # sometimes "chief commercial officer"—watch ambiguity
+  "ciso" = "chief information security officer",
+  "cbo" = "chief business officer",
+  "cxo" = "chief executive officer",
+
+  # --- senior leadership / exec roles ---
+  "pres" = "president",
+  "president" = "president",
+  "vice president" = "vice president",
+  "senior vice president" = "senior vice president",
+  "executive vice president" = "executive vice president",
+  "managing director" = "managing director",
+  "md" = "managing director",                # ambiguous in healthcare
+  "gm" = "general manager",                  # ambiguous but common
+  "general mgr" = "general manager",
+
+  # --- management / leadership ---
+  "dir" = "director",
+  "director" = "director",
+  "sr director" = "senior director",
+  "senior director" = "senior director",
+  "exec director" = "executive director",
+  "executive director" = "executive director",
+
+  "mgr" = "manager",
+  "manager" = "manager",
+  "sr mgr" = "senior manager",
+  "senior manager" = "senior manager",
+  "asst manager" = "assistant manager",
+  "assistant manager" = "assistant manager",
+
+  "supervisor" = "supervisor",
+  "team lead" = "team lead",
+  "tl" = "team lead",                        # can be noisy—watch ambiguity
+
+  # --- functional common abbreviations ---
+  "hr" = "human resources",
+  "it" = "information technology",
+  "pr" = "public relations",
+  "qa" = "quality assurance",
+  "qc" = "quality control",
+  "ops" = "operations",
+  "biz dev" = "business development",
+  "bd" = "business development",             # ambiguous (can be “board” in some contexts)
+  "sales rep" = "sales representative",
+  "rep" = "representative",
+  "sr rep" = "senior representative",
+
+  # --- engineering / tech ---
+  "swe" = "software engineer",
+  "sdet" = "software development engineer in test",
+  "devops" = "devops",
+  "dev ops" = "devops",
+  "secops" = "security operations",
+  "data sci" = "data scientist",
+  "ds" = "data scientist",                   # ambiguous
+  "ml" = "machine learning",
+  "ai" = "artificial intelligence",
+
+  # --- product / project (high ambiguity) ---
+  "pm" = "project manager",                  # could be product manager
+  "pmo" = "project management office",
+  "po" = "product owner",
+  "scrum master" = "scrum master",
+
+  # --- finance / accounting ---
+  "acct" = "accountant",
+  "accounting" = "accounting",
+  "fp a" = "financial planning and analysis",
+  "fpa" = "financial planning and analysis",
+  "ap" = "accounts payable",
+  "ar" = "accounts receivable",
+  "cpa" = "certified public accountant",
+
+  # --- legal / compliance / risk ---
+  "gc" = "general counsel",
+  "counsel" = "counsel",
+  "attorney" = "attorney",
+  "compliance" = "compliance",
+  "risk" = "risk",
+  "audit" = "audit",
+
+  # --- customer / service / success ---
+  "cs" = "customer success",                 # ambiguous (computer science)
+  "csr" = "customer service representative",
+  "support" = "support",
+  "customer support" = "customer support",
+
+  # --- misc common role words ---
+  "admin" = "administrator",
+  "administrator" = "administrator",
+  "assistant" = "assistant",
+  "coordinator" = "coordinator",
+  "specialist" = "specialist",
+  "analyst" = "analyst",
+  "consultant" = "consultant",
+  "engineer" = "engineer",
+  "developer" = "developer"
+)
+
+```
+
+```{r}
+replace_word <- function(x, from, to) {
+  str_replace_all(x, regex(paste0("\\b", from, "\\b"), ignore_case = TRUE), to)
+}
+```
+
+```{r}
+leads <- leads |>
+  mutate(
+    contact_lead_title = reduce(
+      names(title_map),
+      .init = contact_lead_title,
+      .f = \(acc, k) replace_word(acc, k, title_map[[k]])
+    ) |>
+      str_replace_all("\\s+", " ") |>
+      str_trim()
+  )
+```
+
+```{r}
+
+leads |>
+  summarise(n = n(), n_unique = n_distinct(contact_lead_title),
+            n_missing = sum(is.na(contact_lead_title) | contact_lead_title == ""))
+
+```
+
+**Contact Lead Title Grouping Output**
+
+This further reduces the unique values down by another \~100 values.
+The problem at this step is that there are varying combinations of common words that can occur in different frequencies.
+
+#### Contact Lead Title Word Cloud
+
+If we look at a word cloud of the most common 50 words, there is no surprise at what shows up the most frequently.
+
+```{r fig.width= 10, fig.height = 10}
+#remove whitespace
+par(mar = c(0,0,0,0), oma = c(0,0,0,0), xaxs = "i", yaxs = "i")
+
+corp <- corpus(leads, text_field = "contact_lead_title")
+toks <- tokens(corp)
+dfm_mat <- dfm(toks)
+
+textplot_wordcloud(dfm_mat, max_words = 50, max_size = 6, min_size = 0.5)
+```
+
+**Word Cloud Output** Manager, quality, director, assurance, and senior are the most common words implicated by the word cloud.
+
+#### Most Common Word Data Frame
+
+To account for the various combination of words, a data frame is created of the most common occurring words.
+Only words that occur at least 5 times are retained.
+These words will be used to create a flag variable if that word occurred or not.
+
+```{r}
+
+top_features <- topfeatures(dfm_mat,10000)
+
+top_features_df <- data.frame(
+  feature = names(top_features),
+  count = as.numeric(top_features))
+
+count(top_features_df)
+
+non_blank <- leads |>
+  summarise(n = n() - sum(is.na(contact_lead_title) | contact_lead_title == "")) |>
+  pull(n)
+  
+top_features_df <- top_features_df |> filter(count >= 5)
+top_features_df <- top_features_df |> mutate(percentage_occured_non_blank = count / non_blank)
+head(top_features_df,10)
+tail(top_features_df,10)
+
+```
+
+**Common Words Data Frame Output**
+
+Above shows the top 10 occurring words, as well as 10 that only occur 5 times, and for both of these In total 361 words clear this threshold.
+It also has the count of unique words in general that occur, of which their are 2,137.
+
+We can see from below that \~34% of titles have "quality", and \~30% have manager.
+
+#### Common Words Bi-Grams
+
+Additionally we can look at just bi-grams (sequences of only two words from the title field), if we look at this it does give us some more information in regards to word order.
+However, the number of unique word combinations then goes back up greatly, so this will not be further evaluated.
+
+```{r}
+toks_bigram <-tokens_ngrams(toks,n = 2)
+dfm_bigram <-dfm(toks_bigram)
+
+top_features_bi <- topfeatures(dfm_bigram,10000)
+
+top_features_df_bi <- data.frame(
+  feature = names(top_features_bi),
+  count = as.numeric(top_features_bi))
+
+count(top_features_df_bi)
+
+top_features_df_bi <- top_features_df_bi |> filter(count >= 5)
+top_features_df_bi <- top_features_df_bi |> mutate(percentage_occured_non_blank = count / non_blank)
+head(top_features_df_bi,10)
+
+```
+
+### Clean Dataset
+
+In this section, we create a cleaned version of the leads dataset that we can use for EDA (and later modeling) without removing rows.
+
+#### **Steps:**
+
+-   Keep all original columns
+
+-   Standardize “missing-like” text in categorical fields by converting blanks and placeholder values (e.g., "Unknown", "Not Enough Info Found", "MISSING/BLANK") into true NA.
+
+-   Use a recipes pipeline to replace NA values in categorical predictor columns only with a consistent category level called "Low Info" so incomplete enrichment is explicit and rows are retained.
+
+-   Create indicator flags (site_lowinfo, mfg_lowinfo, title_lowinfo, site_or_mfg_lowinfo) that capture whether key enrichment fields ended up as "Low Info".
+
+-   We **do not modify** `next_stage_c` in the recipe because it represents the outcome; any missing outcomes remain missing and are handled separately when computing success rates.
+
+```{r Recipe-Cleaning}
+
+# Drop rows with missing target/outcome
+leads_model <- leads %>%
+  filter(!is.na(next_stage_c))
+
+# Convert placeholder text + blanks to NA (for character/factor columns)
+to_na_lowinfo <- function(x) {
+  x <- str_trim(x)
+  x <- na_if(x, "")
+  x <- if_else(
+    str_to_lower(x) %in% c("missing/blank", "unknown", "not enough info found"),
+    NA_character_,
+    x
+  )
+  x
+}
+
+rec_clean_only <- recipe(~ ., data = leads_model) %>%
+  # Keep IDs as-is (do not clean/encode them as predictors)
+  update_role(qal_id, contact_lead_id, new_role = "id") %>%
+  
+  # Keep outcome column as-is (do not clean it as a predictor)
+  update_role(next_stage_c, new_role = "outcome") %>%
+  
+  # Clean categorical predictors ONLY (excludes id + outcome roles)
+  step_mutate_at(all_nominal_predictors(), fn = to_na_lowinfo) %>%
+  
+  # Replace NA in categorical predictors with a consistent level
+  step_unknown(all_nominal_predictors(), new_level = "Low Info") %>%
+  
+  # Create flags AFTER "Low Info" exists
+  step_mutate(
+    site_lowinfo        = acct_primary_site_function == "Low Info",
+    mfg_lowinfo         = acct_manufacturing_model   == "Low Info",
+    title_lowinfo       = contact_lead_title         == "Low Info",
+    site_or_mfg_lowinfo = site_lowinfo | mfg_lowinfo
+  )
+
+# Apply recipe
+prep_clean_only <- prep(rec_clean_only, training = leads_model, retain = TRUE)
+leads_cleaned_only <- bake(prep_clean_only, new_data = NULL)
+
+# Quick checks
+dim(leads)
+dim(leads_cleaned_only)
+colSums(is.na(leads_cleaned_only))
+table(leads_cleaned_only$site_or_mfg_lowinfo, useNA = "ifany")
+
+```
+
+-   Once the recipe has done the data cleaning the last step is merging the one hot encoded data back to the main cleaned data frame.
+
+```{r}
+#change from factor before creating corpus/tokens
+leads_cleaned_only <- leads_cleaned_only %>%
+  mutate(contact_lead_title = as.character(contact_lead_title))
+
+#create corpus and tokens 
+corp <- corpus(
+  leads_cleaned_only,
+  text_field = "contact_lead_title")
+
+toks <- tokens(corp)
+
+toks_onehot <- tokens_select(
+  toks,
+  pattern = top_features_df$feature)
+
+#create one hot encoded matrix
+dfm_onehot <- dfm(toks_onehot)
+dfm_onehot_bin <- dfm_weight(dfm_onehot, scheme = "boolean")
+df_encoded <- convert(dfm_onehot_bin, to = "data.frame")
+
+#join back together
+leads_cleaned_only <-cbind(leads_cleaned_only, df_encoded[,-1])
+
+#check duplicated columns for target variable binary conversion
+colnames(leads_cleaned_only)[duplicated(colnames(leads_cleaned_only))]
+
+dup_cols <- colnames(leads_cleaned_only)[colnames(leads_cleaned_only) %in% colnames(leads_cleaned_only)[duplicated(colnames(leads_cleaned_only))]]
+dup_cols
+
+#view duplicate columns
+#leads_cleaned_only[, dup_cols]
+
+#drop solution.1
+leads_cleaned_final <- leads_cleaned_only[, colnames(leads_cleaned_only) != "solution.1"]
+head(leads_cleaned_final)
+
+#check for duplicates again
+colnames(leads_cleaned_final)[duplicated(colnames(leads_cleaned_final))]
+
+#now convert target to binary
+leads_cleaned_final <- leads_cleaned_final %>%
+  mutate(
+    next_stage_target = factor(
+      if_else(next_stage_c %in% c("SQL", "SQO", "Won"), 1, 0)
+    )
+  )
+
+#view dataframe
+head(leads_cleaned_final)
+
+#save final modeling-ready dataset
+dir.create("data", showWarnings = FALSE)
+saveRDS(leads_cleaned_final, "data/leads_cleaned_final.rds")
+
+```
+
+#### Interpretation (Clean Dataset checks)
+
+-   **Shape:** The full dataset (`leads`) contains **16,815 rows** and **14 columns**.\
+    For modeling, we drop rows with missing outcome (`next_stage_c`), resulting in **16,332 rows**.\
+    After applying the recipe, the cleaned modeling dataset keeps **all 16,332 rows** and increases to **3379 columns** because we added 4 flags for low information and 361 for word occurrences :\
+    `site_lowinfo`, `mfg_lowinfo`, `title_lowinfo`, `site_or_mfg_lowinfo`.\
+    When converting the target variable `next_stage_c` to binary (1,0), the error of duplicate column names was returned.
+    We checked which columns we duplicated, 'solution' was the duplicated column, and then removed it.
+    Then we continued with turning the target variable into binary and it worked successfully.
+
+-   **Missing values after recipe (`colSums(is.na())`):**
+
+    -   `acct_primary_site_function`, `acct_manufacturing_model`, `contact_lead_title` now have **0 NA** because NAs + placeholder values were standardized and replaced with the factor level **"Low Info"**.
+    -   `next_stage_c` has **0 NA** in the cleaned modeling dataset because rows with missing outcomes were removed **before** the recipe (`filter(!is.na(next_stage_c))`).
+    -   `contact_lead_id` still has **2 NA** (ID column kept as-is and not imputed).
+
+-   **Low-info flag (`table(site_or_mfg_lowinfo)`):**
+
+    -   `FALSE = 7,859`: both site + manufacturing enrichment are present (not **"Low Info"**)
+    -   `TRUE  = 8,473`: **at least one** of site or manufacturing is **"Low Info"**
+
+**Key takeaway:** After restricting to leads with known outcomes, low-enrichment (**"Low Info"**) values remain very common and should be treated as signal rather than noise.
+We standardize missing/placeholder values into a consistent **"Low Info"** category for categorical predictors and create indicator flags (e.g., `site_or_mfg_lowinfo`, `title_lowinfo`) so downstream models can learn the relationship between enrichment quality and lead progression.
+
+# Clustering EDA
+
+Clustering reveals multi-dimensional lead segments that simple cross-tabulations cannot surface.
+Where a bar chart shows one variable at a time (e.g., industry vs. conversion), clustering operates across all dimensions simultaneously — discovering combinations like "Small tier + EMEA + Medical Device + SEO channel" that form coherent, high-converting archetypes invisible in univariate analysis.
+
+We perform four clustering analyses, each targeting a different question:
+
+1.  **Account Profile Clustering** — What natural account archetypes exist, and how do they convert?
+2.  **Title-Based Role Clustering** — Can we collapse 361 title word indicators into interpretable role families?
+3.  **MX-Specific Lead Profile Clustering** — What distinct Mx lead profiles exist, ranked by conversion?
+4.  **Success Profile (ICP) Discovery** — What do winning Mx leads look like?
+
+### Shared Setup: Create Success Variable and Site Function Groupings
+
+```{r clustering-setup}
+# Set up cache directory for expensive clustering computations
+cache_dir <- "EDA-Master-Control_cache/clustering"
+dir.create(cache_dir, recursive = TRUE, showWarnings = FALSE)
+
+# Fix duplicate column names from cbind() of one-hot encoded title words
+# (cbind can produce duplicates if any title word matches an existing column)
+dup_cols <- duplicated(names(leads_cleaned_only))
+if (any(dup_cols)) {
+  cat("Removing", sum(dup_cols), "duplicate columns\n")
+  leads_cleaned_only <- leads_cleaned_only[, !dup_cols]
+}
+
+# Create binary success variable on the cleaned dataset
+leads_clustered <- leads_cleaned_only %>%
+  mutate(
+    success = if_else(next_stage_c %in% c("SQL", "SQO", "Won"), 1, 0),
+    # Group 78+ site function levels into 5 categories
+    # (based on case_description.txt suggested groupings)
+    site_function_group = case_when(
+      acct_primary_site_function %in% c(
+        "Oral solid dosage (OSD)", "Sterile injectables",
+        "Small-molecule API", "Biologic API",
+        "Cell therapies (CAR-T, NK)", "Generics manufacturing",
+        "Drug discovery & development", "Nutraceutical manufacturing"
+      ) ~ "Active Pharma Mfg",
+      acct_primary_site_function %in% c(
+        "Implantable devices", "In-vitro diagnostic (IVD) kits",
+        "Diagnostic Equipment", "Surgical instruments",
+        "Single-use disposables"
+      ) ~ "Med Device Mfg",
+      acct_primary_site_function %in% c(
+        "Non-manufacturing organization", "Low Info"
+      ) ~ "Non-Mfg / Low Info",
+      acct_primary_site_function %in% c(
+        "Food and beverage", "Cosmetics manufacturing",
+        "Specialty Chemical Manufacturing", "Secondary packaging",
+        "Lab Instruments"
+      ) ~ "Other Mfg",
+      TRUE ~ "Other Mfg"
+    ),
+    site_function_group = factor(site_function_group)
+  )
+```
+
+## Analysis 1: Account Profile Clustering (Gower + PAM)
+
+We cluster all leads on account-level categorical features to discover natural account archetypes.
+PAM (Partitioning Around Medoids) with Gower distance is ideal for purely categorical data — medoids are real data points, making clusters directly interpretable.
+
+### Prepare Features
+
+```{r acct-cluster-prep}
+acct_df <- leads_clustered %>%
+  select(acct_target_industry, acct_manufacturing_model,
+         site_function_group, acct_tier_rollup,
+         acct_territory_rollup, site_or_mfg_lowinfo) %>%
+  mutate(across(everything(), as.factor))
+
+dim(acct_df)
+```
+
+### Compute Gower Distance and Optimal k
+
+```{r acct-gower-silhouette}
+set.seed(42)
+
+cache_file <- file.path(cache_dir, "gower_acct.rds")
+if (file.exists(cache_file)) {
+  cached <- readRDS(cache_file)
+  gower_dist <- cached$gower_dist
+  sil_widths <- cached$sil_widths
+  cat("Loaded gower_dist and sil_widths from cache\n")
+} else {
+  # Gower distance handles mixed/categorical data natively
+  gower_dist <- daisy(acct_df, metric = "gower")
+
+  # Search for optimal k via silhouette width
+  sil_widths <- sapply(2:10, function(k) {
+    pam_fit <- pam(gower_dist, k = k, diss = TRUE)
+    pam_fit$silinfo$avg.width
+  })
+
+  saveRDS(list(gower_dist = gower_dist, sil_widths = sil_widths), cache_file)
+  cat("Computed and cached gower_dist and sil_widths\n")
+}
+
+sil_df <- data.frame(k = 2:10, avg_silhouette = sil_widths)
+
+ggplot(sil_df, aes(x = k, y = avg_silhouette)) +
+  geom_line() +
+  geom_point(size = 2) +
+  geom_point(data = sil_df %>% filter(avg_silhouette == max(avg_silhouette)),
+             color = "red", size = 4) +
+  labs(title = "Account Clustering: Optimal k by Silhouette Width",
+       x = "Number of Clusters (k)", y = "Average Silhouette Width") +
+  theme_minimal()
+
+best_k_acct <- sil_df$k[which.max(sil_df$avg_silhouette)]
+cat("Optimal k:", best_k_acct, "with avg silhouette:", max(sil_df$avg_silhouette))
+```
+
+The graph shows how good the different number of clusters are.
+The higher the silhouette the better separation between groups.
+The optimal k clusters in this plot is 2 with a silhouette score of **\~.43**.
+This means that the data is not perfectly separated but reasonably strong grouping because the data naturally splits into 2 main groups/clusters, and using 2 clusters gives separation without too much overlap.
+
+### Fit Final PAM Model
+
+```{r acct-pam-fit}
+cache_file <- file.path(cache_dir, "pam_acct.rds")
+if (file.exists(cache_file)) {
+  pam_acct <- readRDS(cache_file)
+  cat("Loaded pam_acct from cache\n")
+} else {
+  pam_acct <- pam(gower_dist, k = best_k_acct, diss = TRUE)
+  saveRDS(pam_acct, cache_file)
+  cat("Computed and cached pam_acct\n")
+}
+
+# Append cluster labels
+leads_clustered$account_cluster <- factor(pam_acct$clustering)
+
+# Silhouette plot
+fviz_silhouette(pam_acct) +
+  labs(title = "Account Cluster Silhouette Plot") +
+  theme_minimal()
+```
+
+This graph shows how well each individual data point fits into its assigned cluster.
+Most accounts clearly belong to one cluster or the other.
+There are few poorly assigned observations into each cluster, meaning the clusters are stable and that the groupings work well, most companies fit naturally into one of the two profiles.
+
+### MCA Biplot with Cluster Overlay
+
+```{r acct-mca-biplot, fig.width=10, fig.height=8}
+# MCA is the categorical analogue of PCA
+mca_acct <- MCA(acct_df, graph = FALSE)
+
+# Extract individual coordinates and color by cluster
+mca_ind <- data.frame(mca_acct$ind$coord[, 1:2])
+mca_ind$cluster <- leads_clustered$account_cluster
+
+ggplot(mca_ind, aes(x = Dim.1, y = Dim.2, color = cluster)) +
+  geom_point(alpha = 0.3, size = 0.8) +
+  stat_ellipse(level = 0.7, linewidth = 1) +
+  labs(title = "Account Clusters in MCA Space",
+       x = paste0("Dim 1 (", round(mca_acct$eig[1, 2], 1), "%)"),
+       y = paste0("Dim 2 (", round(mca_acct$eig[2, 2], 1), "%)"),
+       color = "Cluster") +
+  theme_minimal()
+```
+
+Multi Correspondence Analysis: reduces categorical variables into a 2 dimensional space.
+Each point on the plot is an account/lead.
+Their position is based on similar features like industry, manufacturing type, etc.
+The colors/groups are the cluster assignments.
+- The leads that appear close together share similar characteristics, while the leads that are far apart are more different.
+As shown, Cluster 1 appears more closely together than Cluster 2, where Cluster 1 has a clear focused grouping, while Cluster 2 is more mixed.
+Cluster 2 across the MCA space is more spread out, had less similar characteristics and wide variety of regions, company types, or incomplete information.
+
+**Key Takeaways:**
+
+-   There is structure to the data
+
+-   There is one strong, cohesive lead segment
+
+-   Another grouping is broader and less well-defined
+
+### Cluster Composition Heatmap
+
+```{r acct-composition-heatmap, fig.width=12, fig.height=8}
+# Calculate proportion of each category level within each cluster
+comp_long <- leads_clustered %>%
+  select(account_cluster, acct_target_industry, acct_manufacturing_model,
+         site_function_group, acct_tier_rollup, acct_territory_rollup) %>%
+  pivot_longer(-account_cluster, names_to = "variable", values_to = "level") %>%
+  count(account_cluster, variable, level) %>%
+  group_by(account_cluster, variable) %>%
+  mutate(prop = n / sum(n)) %>%
+  ungroup()
+
+# Show top levels per variable for readability
+top_levels <- comp_long %>%
+  group_by(variable, level) %>%
+  summarise(total_n = sum(n), .groups = "drop") %>%
+  group_by(variable) %>%
+  slice_max(total_n, n = 6) %>%
+  pull(level)
+
+comp_filtered <- comp_long %>%
+  filter(level %in% top_levels) %>%
+  mutate(label = paste0(variable, ": ", level))
+
+ggplot(comp_filtered, aes(x = account_cluster, y = label, fill = prop)) +
+  geom_tile(color = "white") +
+  geom_text(aes(label = scales::percent(prop, accuracy = 1)), size = 2.5) +
+  scale_fill_gradient(low = "white", high = "steelblue") +
+  labs(title = "Account Cluster Composition",
+       x = "Cluster", y = "", fill = "Proportion") +
+  theme_minimal() +
+  theme(axis.text.y = element_text(size = 8))
+```
+
+This heat map shows the feature difference between clusters.
+There are two clusters represented (two account archetypes identified):
+
+-   **Cluster 1 (“Core Pharma”)**: Americas-dominant (57%), Pharma & BioTech (57%), In-House manufacturing (62%), Active Pharma Mfg (31%), Medium tier (60%).
+
+-   **Cluster 2 (“Diverse / Low-Info”)**: More geographically diverse (EMEA 27%, APAC 13%), Medium tier (54%) but more Small accounts (20% vs Cluster 1), higher Non-Mfg/Low Info (61%), more Low Info manufacturing model (60%).
+
+-   Cluster 1 looks more ideal for pharma leads and the other, Cluster 2, is more mixed and less focused.
+
+### Conversion Rate by Account Cluster
+
+```{r acct-conversion, fig.width=10, fig.height=6}
+acct_conv <- leads_clustered %>%
+  group_by(account_cluster, solution_rollup) %>%
+  summarise(
+    n = n(),
+    conversion = mean(success) * 100,
+    .groups = "drop"
+  )
+
+ggplot(acct_conv, aes(x = account_cluster, y = conversion, fill = solution_rollup)) +
+  geom_col(position = "dodge") +
+  geom_text(aes(label = paste0(round(conversion, 1), "%\nn=", n)),
+            position = position_dodge(width = 0.9), vjust = -0.3, size = 3) +
+  geom_hline(yintercept = 12.7, linetype = "dashed", color = "orange", linewidth = 0.8) +
+  geom_hline(yintercept = 19.7, linetype = "dashed", color = "blue", linewidth = 0.8) +
+  annotate("text", x = 0.5, y = 13.5, label = "Mx avg (12.7%)", color = "orange", hjust = 0, size = 3) +
+  annotate("text", x = 0.5, y = 20.5, label = "Qx avg (19.7%)", color = "blue", hjust = 0, size = 3) +
+  labs(title = "Lead Conversion Rate by Account Cluster",
+       subtitle = "Dashed lines show overall Mx and Qx averages",
+       x = "Account Cluster", y = "Conversion Rate (%)", fill = "Product") +
+  theme_minimal()
+```
+
+The graph shows the conversion rate by Cluster and product (MX, QX, AX).
+
+**Key conversion finding**: Cluster 1 (Core Pharma) has Mx conversion of **17.7%** vs Cluster 2 at **7.2%**.
+Cluster 1 also has Qx at 31.5% vs Cluster 2 at 13.1%.
+The Core Pharma archetype converts at 2.5x the rate for MC.
+
+-   Successful customers are more likely to be from Cluster 1.
+
+<!-- -->
+
+-   American based Pharma/BioTech or medical device companies focused and companies with real manufacturing operations.
+
+-   This is a major targeting signal.
+    Winning customers follow a clear “ideal customer profile”.
+
+### Cluster Size Summary
+
+```{r acct-cluster-size}
+cluster_summary <- leads_clustered %>%
+  group_by(account_cluster) %>%
+  summarise(
+    n = n(),
+    pct_of_total = round(100 * n() / nrow(leads_clustered), 1),
+    mx_conversion = round(mean(success[solution_rollup == "Mx"]) * 100, 2),
+    qx_conversion = round(mean(success[solution_rollup == "Qx"]) * 100, 2),
+    pct_lowinfo = round(mean(site_or_mfg_lowinfo == TRUE) * 100, 1),
+    .groups = "drop"
+  )
+
+cluster_summary
+```
+
+### Medoid Profiles (Cluster Archetypes)
+
+```{r acct-medoids}
+# The medoid is the most representative lead in each cluster
+medoid_rows <- pam_acct$id.med
+medoid_profiles <- leads_clustered[medoid_rows, ] %>%
+  select(account_cluster, acct_target_industry, acct_manufacturing_model,
+         site_function_group, acct_tier_rollup, acct_territory_rollup,
+         site_or_mfg_lowinfo)
+
+medoid_profiles
+```
+
+#### Business Translation
+
+Each cluster represents a distinct account archetype.
+Compare the conversion rates above to the MX baseline of **12.7%**.
+Clusters with above-average conversion contain the account profiles that show a strong signal for MX targeting.
+Clusters with very low conversion (especially those dominated by "Low Info" or "Non-Mfg") represent targeting waste.
+
+------------------------------------------------------------------------
+
+## Analysis 2: Title-Based Role Clustering (Jaccard + Hierarchical)
+
+We cluster the 361 binary title word indicators to discover natural "role families" among contacts.
+Jaccard distance is ideal for binary presence/absence data because it ignores shared zeros — two titles are not considered similar simply because they both lack the word "pharmacist."
+
+### Prepare Title Data
+
+```{r title-cluster-prep}
+# Identify title word indicator columns (binary flags from one-hot encoding)
+title_word_cols <- top_features_df$feature
+
+# Filter to rows with actual titles (not Low Info)
+title_df <- leads_clustered %>%
+  filter(title_lowinfo == FALSE) %>%
+  select(all_of(title_word_cols))
+
+# Convert to numeric matrix for distance computation
+title_mat <- as.matrix(title_df)
+storage.mode(title_mat) <- "integer"
+
+cat("Title matrix dimensions:", dim(title_mat), "\n")
+cat("Rows with titles:", nrow(title_mat))
+```
+
+### Compute Jaccard Distance and Hierarchical Clustering
+
+```{r title-jaccard-hclust}
+set.seed(42)
+
+cache_file <- file.path(cache_dir, "jacc_title.rds")
+if (file.exists(cache_file)) {
+  cached <- readRDS(cache_file)
+  jacc_dist <- cached$jacc_dist
+  hc_title <- cached$hc_title
+  sample_idx <- cached$sample_idx
+  title_mat_sample <- title_mat[sample_idx, ]
+  cat("Loaded jacc_dist, hc_title, and sample_idx from cache\n")
+} else {
+  # If dataset is large, sample for distance computation
+  if (nrow(title_mat) > 5000) {
+    sample_idx <- sample(nrow(title_mat), 5000)
+    title_mat_sample <- title_mat[sample_idx, ]
+    cat("Sampled", nrow(title_mat_sample), "rows for distance computation\n")
+  } else {
+    title_mat_sample <- title_mat
+    sample_idx <- seq_len(nrow(title_mat))
+  }
+
+  # Jaccard distance for binary presence/absence data
+  jacc_dist <- proxy::dist(title_mat_sample, method = "Jaccard")
+
+  # Ward's hierarchical clustering
+  hc_title <- hclust(jacc_dist, method = "ward.D2")
+
+  saveRDS(list(jacc_dist = jacc_dist, hc_title = hc_title, sample_idx = sample_idx), cache_file)
+  cat("Computed and cached jacc_dist, hc_title, and sample_idx\n")
+}
+```
+
+### Silhouette Analysis for Optimal k
+
+```{r title-silhouette}
+sil_title <- sapply(3:12, function(k) {
+  cl <- cutree(hc_title, k = k)
+  mean(silhouette(cl, jacc_dist)[, "sil_width"])
+})
+
+sil_title_df <- data.frame(k = 3:12, avg_silhouette = sil_title)
+
+ggplot(sil_title_df, aes(x = k, y = avg_silhouette)) +
+  geom_line() +
+  geom_point(size = 2) +
+  geom_point(data = sil_title_df %>% filter(avg_silhouette == max(avg_silhouette)),
+             color = "red", size = 4) +
+  labs(title = "Title Role Clustering: Optimal k by Silhouette Width",
+       x = "Number of Clusters (k)", y = "Average Silhouette Width") +
+  theme_minimal()
+
+best_k_title <- sil_title_df$k[which.max(sil_title_df$avg_silhouette)]
+cat("Optimal k:", best_k_title, "with avg silhouette:", max(sil_title_df$avg_silhouette))
+```
+
+Similar to the silhouette graph from Analysis 1, the graph shows how good the different number of clusters are.
+The higher the silhouette the better separation between groups.
+This silhouette has very low scores **(.03-.075 range)** peaking at k = 12.
+This indicates there is weak cluster structure in job titles, meaning that job titles are very heterogeneous and don’t form tight groups.
+
+### Dendrogram
+
+```{r title-dendrogram, fig.width=12, fig.height=6}
+dend <- as.dendrogram(hc_title)
+dend <- color_branches(dend, k = best_k_title)
+
+plot(dend, leaflab = "none",
+     main = paste0("Title Role Family Dendrogram (k=", best_k_title, ")"))
+```
+
+The dendrogram is showing a hierarchical clustering of job title role families.
+The structure shows which roles are most similar, how groups merge together, and how distinct the clusters are.
+The lower joins the more similar roles, while the higher joins are more different roles.
+The higher level merging shows that multiple subgroups merge into broader categories and that the difference between role families exist, but they are not extremely distinct.
+This implies that there is gradual merging rather than clear hard splits of job title groupings.
+
+### Cluster-Word Heatmap (What Each Role Family Means)
+
+```{r title-heatmap, fig.width=12, fig.height=8}
+title_clusters_sample <- cutree(hc_title, k = best_k_title)
+
+# Profile each cluster by word proportion
+cluster_word_props <- title_mat_sample %>%
+  as.data.frame() %>%
+  mutate(cluster = factor(title_clusters_sample)) %>%
+  group_by(cluster) %>%
+  summarise(across(everything(), mean), .groups = "drop")
+
+# Select top 30 most discriminating words (highest variance across clusters)
+word_variance <- apply(cluster_word_props[, -1], 2, var)
+top_30_words <- names(sort(word_variance, decreasing = TRUE))[1:30]
+
+heatmap_data <- cluster_word_props %>%
+  select(cluster, all_of(top_30_words)) %>%
+  tibble::column_to_rownames("cluster") %>%
+  as.matrix()
+
+pheatmap(t(heatmap_data),
+         main = "Role Family Profiles: Top 30 Discriminating Title Words",
+         cluster_rows = TRUE, cluster_cols = FALSE,
+         display_numbers = TRUE, number_format = "%.2f",
+         fontsize_number = 7, fontsize_row = 9,
+         color = colorRampPalette(c("white", "steelblue"))(50))
+```
+
+Similar to account title clustering from Analysis 1, the heat map shows the feature difference between clusters and how different job title families behave across features or outcomes.
+Some job title clusters will have higher values in certain features and others showing lower engagement or conversion signals.
+Implying that the job title impacts how leads behave.
+The higher managerial/director role might have higher engagement in prospecting versus an account/administrative role may have showing weaker signals.
+
+### Assign Clusters to Full Dataset
+
+```{r title-assign-all}
+# Assign cluster labels to sampled rows, then assign remaining rows
+# to nearest cluster centroid via Jaccard distance to cluster means
+
+# Replace any NAs in title_mat with 0 (missing indicator = "not present")
+title_mat[is.na(title_mat)] <- 0L
+
+# Compute cluster centroids (mean binary vectors)
+centroids <- title_mat_sample %>%
+  as.data.frame() %>%
+  mutate(cluster = title_clusters_sample) %>%
+  group_by(cluster) %>%
+  summarise(across(everything(), mean), .groups = "drop")
+
+centroid_mat <- as.matrix(centroids[, -1])
+
+# Assign all title rows to nearest centroid
+assign_cluster <- function(row, centroids) {
+  # Jaccard-like distance: 1 - (intersection / union) for binary vs continuous
+  dists <- apply(centroids, 1, function(c) {
+    intersection <- sum(pmin(row, c, na.rm = TRUE))
+    union_val <- sum(pmax(row, c, na.rm = TRUE))
+    if (is.na(union_val) || union_val == 0) return(1)
+    1 - intersection / union_val
+  })
+  which.min(dists)
+}
+
+all_title_clusters <- apply(title_mat, 1, assign_cluster, centroids = centroid_mat)
+
+# Add to main dataset
+leads_clustered$title_cluster <- NA_integer_
+title_rows <- which(leads_clustered$title_lowinfo == FALSE)
+leads_clustered$title_cluster[title_rows] <- all_title_clusters
+leads_clustered$title_cluster <- factor(leads_clustered$title_cluster)
+
+table(leads_clustered$title_cluster, useNA = "ifany")
+```
+
+### Conversion Rate by Role Cluster
+
+```{r title-conversion, fig.width=10, fig.height=6}
+title_conv <- leads_clustered %>%
+  filter(!is.na(title_cluster)) %>%
+  group_by(title_cluster, solution_rollup) %>%
+  summarise(
+    n = n(),
+    conversion = mean(success) * 100,
+    .groups = "drop"
+  )
+
+ggplot(title_conv, aes(x = title_cluster, y = conversion, fill = solution_rollup)) +
+  geom_col(position = "dodge") +
+  geom_text(aes(label = paste0(round(conversion, 1), "%\nn=", n)),
+            position = position_dodge(width = 0.9), vjust = -0.3, size = 3) +
+  geom_hline(yintercept = 12.7, linetype = "dashed", color = "orange") +
+  geom_hline(yintercept = 19.7, linetype = "dashed", color = "blue") +
+  labs(title = "Lead Conversion by Title Role Family",
+       subtitle = "Dashed lines: Mx avg (orange) and Qx avg (blue)",
+       x = "Role Cluster", y = "Conversion Rate (%)", fill = "Product") +
+  theme_minimal()
+```
+
+This graph shows which job title converts more often by product.
+There are job titles/roles that are much more likely to convert.
+Targeting the right role matters as much as targeting the right company.
+
+**Key conversion finding:** Cluster 3 (quality-focused) has the highest MX conversion at **15.2%** with n=734 — above the **12.7%** MX average.
+Cluster 5 also shows MX at **11.7%** (n=539).
+Clusters 8 and 9 (IT-focused) have near-zero MX conversion.
+The quality/assurance role family is the strongest MX conversion signal from titles.
+
+### t-SNE Visualization
+
+```{r title-tsne, fig.width=10, fig.height=8, cache=TRUE}
+set.seed(42)
+
+# t-SNE on the sampled title data
+tsne_result <- Rtsne(jacc_dist, is_distance = TRUE, perplexity = 30, dims = 2)
+
+tsne_df <- data.frame(
+  x = tsne_result$Y[, 1],
+  y = tsne_result$Y[, 2],
+  cluster = factor(title_clusters_sample)
+)
+
+ggplot(tsne_df, aes(x = x, y = y, color = cluster)) +
+  geom_point(alpha = 0.4, size = 0.8) +
+  labs(title = "Title Role Families in t-SNE Space",
+       x = "t-SNE 1", y = "t-SNE 2", color = "Role Cluster") +
+  theme_minimal()
+```
+
+This graph shows visual clusters of leads based on features/job titles.
+There are some spatial separation of clusters but there is significant overlap, which is consistent with the low silhouette scores, in Analysis 1 Title Role Clustering Silhouette.
+The clusters have weaker structure and don’t form tight groups.
+
+### Role Family Summary Table
+
+```{r title-role-summary}
+# For each cluster, show top 5 defining words and conversion rates
+role_summary <- leads_clustered %>%
+  filter(!is.na(title_cluster)) %>%
+  group_by(title_cluster) %>%
+  summarise(
+    n = n(),
+    mx_conversion = round(mean(success[solution_rollup == "Mx"]) * 100, 2),
+    qx_conversion = round(mean(success[solution_rollup == "Qx"]) * 100, 2),
+    .groups = "drop"
+  )
+
+# Add top words from the heatmap data
+top_words_per_cluster <- cluster_word_props %>%
+  pivot_longer(-cluster, names_to = "word", values_to = "prop") %>%
+  group_by(cluster) %>%
+  slice_max(prop, n = 5) %>%
+  summarise(top_words = paste(word, collapse = ", "), .groups = "drop")
+
+role_summary <- role_summary %>%
+  left_join(top_words_per_cluster, by = c("title_cluster" = "cluster"))
+
+role_summary
+```
+
+#### Business Translation
+
+Each role cluster represents a distinct job function family.
+The conversion rates above reveal which role families are most receptive to MX vs. QX.
+The sales team can use these role families as targeting criteria — for example, if "Operations/Manufacturing Directors" convert at **20%**+ for MX while "Quality Specialists" convert at only **8%**, that directly informs outbound prospecting priorities.
+
+------------------------------------------------------------------------
+
+## Analysis 3: MX-Specific Lead Profile Clustering (MCA + k-means)
+
+This is the most directly actionable analysis.
+We focus exclusively on MX leads and cluster them using all available features to find distinct lead profiles, then rank profiles by conversion rate.
+
+MCA (Multiple Correspondence Analysis) is used for dimensionality reduction — the categorical equivalent of PCA — followed by k-means on the resulting continuous dimensions.
+
+### Prepare MX Data
+
+```{r mx-cluster-prep}
+mx_leads <- leads_clustered %>%
+  filter(solution_rollup == "Mx") %>%
+  mutate(
+    # Group manufacturing model to top 8 + Other + Low Info
+    mfg_model_group = fct_lump_n(acct_manufacturing_model, n = 8,
+                                  other_level = "Other"),
+    # Group priority into 4 levels
+    priority_group = case_when(
+      str_detect(priority, "P1 - (Video|Live|Webinar) Demo|P1 - Website Pricing") ~ "P1 High-Intent",
+      str_detect(priority, "P1 - Contact Us|P1 - MQL|P1 - Discount") ~ "P1 Standard",
+      priority == "Priority 1" ~ "P1 Standard",
+      priority == "Priority 2" ~ "P2",
+      TRUE ~ "Low/No Priority"
+    ),
+    priority_group = factor(priority_group)
+  )
+
+# Select clustering features
+mx_cluster_df <- mx_leads %>%
+  select(acct_target_industry, mfg_model_group, site_function_group,
+         acct_tier_rollup, acct_territory_rollup,
+         last_tactic_campaign_channel, priority_group,
+         site_or_mfg_lowinfo, title_lowinfo) %>%
+  mutate(across(everything(), as.factor))
+
+cat("Mx leads for clustering:", nrow(mx_cluster_df), "\n")
+cat("Features:", ncol(mx_cluster_df))
+```
+
+### MCA Dimensionality Reduction
+
+```{r mx-mca, fig.width=10, fig.height=8}
+mca_mx <- MCA(mx_cluster_df, graph = FALSE)
+
+# Screeplot: how many dimensions to retain?
+fviz_screeplot(mca_mx, addlabels = TRUE, ncp = 15) +
+  labs(title = "MCA Screeplot: Mx Leads") +
+  theme_minimal()
+
+# Cumulative inertia
+cum_inertia <- cumsum(mca_mx$eig[, 2])
+# If 70% inertia is never reached, use all available dimensions
+if (any(cum_inertia >= 70)) {
+  n_dim <- min(which(cum_inertia >= 70))
+} else {
+  n_dim <- length(cum_inertia)
+}
+cat("Dimensions to retain (>=70% inertia):", n_dim, "\n")
+cat("Cumulative inertia at", n_dim, "dims:", round(cum_inertia[min(n_dim, length(cum_inertia))], 1), "%")
+```
+
+This graph displays each MCA dimension and the percentage of variance explained by each dimension.
+The higher the variance the more important dimension.
+Dimension 1 explains only **8.6%** and captures the main patterns in MX leads characteristics.
+The visible drop-off after the initial dimensions suggests that most meaningful segmentation can be represented in a 2-3 dimensional space.
+
+### MCA Variable Biplot
+
+```{r mx-mca-biplot, fig.width=12, fig.height=10}
+fviz_mca_var(mca_mx, repel = TRUE, col.var = "contrib",
+             gradient.cols = c("#00AFBB", "#E7B800", "#FC4E07")) +
+  labs(title = "MCA Variable Map: Which Category Levels Co-Occur for Mx Leads") +
+  theme_minimal()
+```
+
+The MCA Variable Biplot captures how categorical variable levels relate to each other in reduced-dimensional space.
+Each point represents a level (industry = Pharma, region = Americas, manufacturing type, job title etc).
+The distance between the points means the closer to each other the more similar or frequently occurring to each other.
+The further apart the points are, the more different they are to each other.
+The clusters that appear closer together tend to be the same type of leads.
+The points positioned far from the origin act as a strong differentiators between lead types, while centrally located variables contribute less to segmentation.
+
+### Optimal k for k-means on MCA Scores
+
+```{r mx-kmeans-optimal, fig.width=8, fig.height=5}
+# Cap at available dimensions (MCA may produce fewer than n_dim)
+n_avail <- ncol(mca_mx$ind$coord)
+mca_coords <- mca_mx$ind$coord[, 1:min(n_dim, n_avail, 15)]
+
+# Silhouette method
+fviz_nbclust(mca_coords, kmeans, method = "silhouette", k.max = 8) +
+  labs(title = "Mx Lead Clustering: Optimal k (Silhouette)") +
+  theme_minimal()
+```
+
+Similar to the other silhouette analyses, the graph shows how good the different number of clusters are.
+Cluster 6 has the highest silhouette score of .35.
+The range is pretty low from **(0.0-0.35)**.
+Additionally, similarly to the silhouette analysis in Analysis 2 - Title Job Silhouette, the clustering is weak and doesn’t have strong structure per the low scoring range.
+There are lead segments but have some overlap.
+
+### Fit k-means
+
+```{r mx-kmeans-fit}
+set.seed(42)
+
+cache_file <- file.path(cache_dir, "kmeans_mx.rds")
+if (file.exists(cache_file)) {
+  cached <- readRDS(cache_file)
+  sil_km <- cached$sil_km
+  km_mx <- cached$km_mx
+  cat("Loaded km_mx from cache\n")
+} else {
+  # Use silhouette-optimal k
+  sil_km <- sapply(2:8, function(k) {
+    km <- kmeans(mca_coords, centers = k, nstart = 25)
+    mean(silhouette(km$cluster, dist(mca_coords))[, "sil_width"])
+  })
+
+  best_k_mx <- (2:8)[which.max(sil_km)]
+  km_mx <- kmeans(mca_coords, centers = best_k_mx, nstart = 25)
+
+  saveRDS(list(sil_km = sil_km, km_mx = km_mx), cache_file)
+  cat("Computed and cached km_mx\n")
+}
+
+best_k_mx <- (2:8)[which.max(sil_km)]
+cat("Optimal k for Mx clustering:", best_k_mx, "\n")
+
+mx_leads$mx_cluster <- factor(km_mx$cluster)
+```
+
+### Mx Cluster Individuals in MCA Space
+
+```{r mx-cluster-plot, fig.width=10, fig.height=8}
+mca_plot_df <- data.frame(
+  Dim1 = mca_coords[, 1],
+  Dim2 = mca_coords[, 2],
+  cluster = mx_leads$mx_cluster
+)
+
+ggplot(mca_plot_df, aes(x = Dim1, y = Dim2, color = cluster)) +
+  geom_point(alpha = 0.4, size = 1) +
+  stat_ellipse(level = 0.7, linewidth = 1) +
+  labs(title = "Mx Lead Clusters in MCA Space",
+       x = paste0("Dim 1 (", round(mca_mx$eig[1, 2], 1), "%)"),
+       y = paste0("Dim 2 (", round(mca_mx$eig[2, 2], 1), "%)"),
+       color = "Mx Cluster") +
+  theme_minimal()
+```
+
+Similar to the Title Job Clusters in MCA Space in Analysis 1, the MCA space reduces categorical variables into a 2 dimensional space.
+Each point on the plot is an account/lead.
+The position is based in similarity based on attributes and the color/group is each cluster assignment.
+As we can see, there are multiple clusters that overlap supporting the fact that the clustering is weak with not a strong distinction between each cluster.
+
+### Mx Conversion Rate by Cluster
+
+```{r mx-conversion, fig.width=10, fig.height=6}
+mx_conv <- mx_leads %>%
+  group_by(mx_cluster) %>%
+  summarise(
+    n = n(),
+    pct_of_mx = round(100 * n() / nrow(mx_leads), 1),
+    conversion = round(mean(success) * 100, 2),
+    .groups = "drop"
+  ) %>%
+  arrange(desc(conversion))
+
+ggplot(mx_conv, aes(x = reorder(mx_cluster, -conversion), y = conversion,
+                     fill = conversion > 12.7)) +
+  geom_col() +
+  geom_text(aes(label = paste0(conversion, "%\nn=", n, " (", pct_of_mx, "%)")),
+            vjust = -0.3, size = 3.5) +
+  geom_hline(yintercept = 12.7, linetype = "dashed", color = "red", linewidth = 0.8) +
+  annotate("text", x = 0.5, y = 13.5, label = "Mx avg: 12.7%", color = "red",
+           hjust = 0, size = 3) +
+  scale_fill_manual(values = c("TRUE" = "steelblue", "FALSE" = "grey60"),
+                    guide = "none") +
+  labs(title = "Mx Lead Conversion Rate by Cluster",
+       subtitle = "Blue = above Mx average, Grey = below",
+       x = "Mx Cluster (ordered by conversion)", y = "Conversion Rate (%)") +
+  theme_minimal()
+
+mx_conv
+```
+
+This graph shows the conversion rate of MX product by each lead cluster.
+Some clusters are more likely to convert than others.
+Cluster 5 has the highest conversion rate of **16.5%**, - **Key conversion finding**: Cluster 4 represents **\~20%** of all MX leads but converts at only **2%**.
+These 821 leads are likely targeting waste.
+Meanwhile, Clusters 5+6+2 (56.3% of leads) convert at **15–21%**, well above the **12.7%** average.
+Profiling what distinguishes Cluster 4 from Cluster 5 would directly inform targeting improvements.
+With Cluster 5 having the highest conversion rate of **16.5%**, and in Analysis 1 Cluster 1 (Core Pharma) had a conversion rate of **17.7%**, this lines up to suggest that Cluster 5 in this analysis has similarities to Cluster 1 (Core Pharma).
+
+### Mx Cluster Profile Summary
+
+```{r mx-cluster-profiles}
+# For each cluster, show the dominant category in each feature
+mx_profiles <- mx_leads %>%
+  group_by(mx_cluster) %>%
+  summarise(
+    n = n(),
+    conversion = round(mean(success) * 100, 2),
+    top_industry = names(sort(table(acct_target_industry), decreasing = TRUE))[1],
+    top_mfg_model = names(sort(table(mfg_model_group), decreasing = TRUE))[1],
+    top_site_fn = names(sort(table(site_function_group), decreasing = TRUE))[1],
+    top_tier = names(sort(table(acct_tier_rollup), decreasing = TRUE))[1],
+    top_territory = names(sort(table(acct_territory_rollup), decreasing = TRUE))[1],
+    top_channel = names(sort(table(last_tactic_campaign_channel), decreasing = TRUE))[1],
+    top_priority = names(sort(table(priority_group), decreasing = TRUE))[1],
+    pct_lowinfo = round(mean(site_or_mfg_lowinfo == TRUE) * 100, 1),
+    .groups = "drop"
+  ) %>%
+  arrange(desc(conversion))
+
+mx_profiles
+```
+
+#### Business Translation
+
+The clusters above represent distinct MX lead archetypes.
+The highest-converting cluster(s) reveal the "golden MX profile" — the combination of industry, company type, channel, and priority that sales should prioritize.
+Low-converting clusters (especially those with high % Low Info) represent leads where current targeting is inefficient.
+If MasterControl shifts MX outreach toward the highest-converting cluster, the overall MX progression rate can move toward the **16-18%** target.
+
+------------------------------------------------------------------------
+
+## Analysis 4: Success Profile Clustering — ICP Discovery (Gower + PAM)
+
+We cluster ONLY successful MX leads (SQL/SQO/Won) to reverse-engineer the Ideal Customer Profile.
+With only \~529 successes, PAM is ideal — the medoid of each cluster is a real winning lead that serves as a concrete archetype.
+
+### Prepare Successful Mx Leads
+
+```{r icp-prep}
+mx_success <- leads_clustered %>%
+  filter(solution_rollup == "Mx",
+         next_stage_c %in% c("SQL", "SQO", "Won")) %>%
+  mutate(
+    mfg_model_group = fct_lump_n(acct_manufacturing_model, n = 8,
+                                  other_level = "Other"),
+    priority_group = case_when(
+      str_detect(priority, "P1 - (Video|Live|Webinar) Demo|P1 - Website Pricing") ~ "P1 High-Intent",
+      str_detect(priority, "P1 - Contact Us|P1 - MQL|P1 - Discount") ~ "P1 Standard",
+      priority == "Priority 1" ~ "P1 Standard",
+      priority == "Priority 2" ~ "P2",
+      TRUE ~ "Low/No Priority"
+    )
+  )
+
+cat("Successful Mx leads:", nrow(mx_success))
+```
+
+### Select ICP Features
+
+```{r icp-features}
+# Top title word indicators for ICP analysis
+top_title_words <- c("quality", "manager", "director", "operations",
+                     "manufacturing", "regulatory", "vice", "president",
+                     "engineer", "senior", "compliance", "systems",
+                     "specialist", "chief", "lead")
+
+# Only include title words that exist in the dataset
+available_title_words <- intersect(top_title_words, names(mx_success))
+
+icp_df <- mx_success %>%
+  select(acct_target_industry, mfg_model_group, site_function_group,
+         acct_tier_rollup, acct_territory_rollup,
+         last_tactic_campaign_channel, priority_group,
+         all_of(available_title_words)) %>%
+  mutate(across(where(is.character), as.factor),
+         across(where(is.numeric), as.factor))
+
+cat("ICP features:", ncol(icp_df), "\n")
+cat("Successful Mx leads:", nrow(icp_df))
+```
+
+### Gower Distance + Optimal k
+
+```{r icp-gower-sil}
+cache_file <- file.path(cache_dir, "gower_icp.rds")
+if (file.exists(cache_file)) {
+  cached <- readRDS(cache_file)
+  gower_icp <- cached$gower_icp
+  sil_icp <- cached$sil_icp
+  cat("Loaded gower_icp and sil_icp from cache\n")
+} else {
+  gower_icp <- daisy(icp_df, metric = "gower")
+
+  sil_icp <- sapply(2:6, function(k) {
+    pam_fit <- pam(gower_icp, k = k, diss = TRUE)
+    pam_fit$silinfo$avg.width
+  })
+
+  saveRDS(list(gower_icp = gower_icp, sil_icp = sil_icp), cache_file)
+  cat("Computed and cached gower_icp and sil_icp\n")
+}
+
+sil_icp_df <- data.frame(k = 2:6, avg_silhouette = sil_icp)
+
+ggplot(sil_icp_df, aes(x = k, y = avg_silhouette)) +
+  geom_line() +
+  geom_point(size = 2) +
+  geom_point(data = sil_icp_df %>% filter(avg_silhouette == max(avg_silhouette)),
+             color = "red", size = 4) +
+  labs(title = "ICP Clustering: Optimal k by Silhouette Width",
+       x = "Number of Clusters (k)", y = "Average Silhouette Width") +
+  theme_minimal()
+
+best_k_icp <- sil_icp_df$k[which.max(sil_icp_df$avg_silhouette)]
+cat("Optimal k for ICP:", best_k_icp, "with avg silhouette:", max(sil_icp_df$avg_silhouette))
+```
+
+Similar to other silhouette analyses, the silhouette range is very low **(\~.1 to .1)**.
+The successful leads don’t form distinct internal clusters.
+They are relatively homogeneous, which makes sense; successful leads share a common profile.
+The optimal k value is 2 with a score of .1.
+
+### Fit PAM and Extract ICPs
+
+```{r icp-pam-fit}
+pam_icp <- pam(gower_icp, k = best_k_icp, diss = TRUE)
+
+mx_success$icp_cluster <- factor(pam_icp$clustering)
+
+# Silhouette plot
+fviz_silhouette(pam_icp) +
+  labs(title = "ICP Cluster Silhouette Plot") +
+  theme_minimal()
+```
+
+This graph shows how well each individual data point fits into its assigned cluster.
+At k = 2 (2 clusters) and a score of **.1**.
+As stated in the previous analysis plot, having a score of **.1** indicates weak separation between clusters.
+This suggests that successful leads do not naturally split into clearly distinct subgroups, instead appear relatively homogeneous, which aligns with what was stated in analysis 1 that successful leads share a consistent customer profile.
+
+### ICP Archetype Table (Medoid Profiles)
+
+```{r icp-medoids}
+# Each medoid IS a real winning Mx lead — the concrete archetype
+medoid_icp_rows <- pam_icp$id.med
+icp_archetypes <- mx_success[medoid_icp_rows, ] %>%
+  select(icp_cluster, acct_target_industry, mfg_model_group, site_function_group,
+         acct_tier_rollup, acct_territory_rollup,
+         last_tactic_campaign_channel, priority_group,
+         contact_lead_title)
+
+icp_archetypes
+```
+
+### ICP Cluster Composition vs. Overall MX Population
+
+```{r icp-vs-population, fig.width=12, fig.height=8}
+# Compare: what % of successful Mx leads are in each category vs. all Mx leads?
+mx_all_with_cluster <- leads_clustered %>%
+  filter(solution_rollup == "Mx") %>%
+  mutate(
+    mfg_model_group = fct_lump_n(acct_manufacturing_model, n = 8, other_level = "Other")
+  )
+
+compare_vars <- c("acct_target_industry", "site_function_group", "acct_tier_rollup",
+                   "acct_territory_rollup")
+
+comparison_data <- bind_rows(
+  mx_all_with_cluster %>%
+    select(all_of(compare_vars)) %>%
+    pivot_longer(everything(), names_to = "variable", values_to = "level") %>%
+    count(variable, level) %>%
+    group_by(variable) %>%
+    mutate(prop = n / sum(n), group = "All Mx Leads") %>%
+    ungroup(),
+  mx_success %>%
+    select(all_of(compare_vars)) %>%
+    pivot_longer(everything(), names_to = "variable", values_to = "level") %>%
+    count(variable, level) %>%
+    group_by(variable) %>%
+    mutate(prop = n / sum(n), group = "Successful Mx Leads") %>%
+    ungroup()
+)
+
+ggplot(comparison_data, aes(x = level, y = prop, fill = group)) +
+  geom_col(position = "dodge") +
+  facet_wrap(~ variable, scales = "free_x") +
+  scale_y_continuous(labels = scales::percent) +
+  labs(title = "Successful Mx Leads vs. All Mx Leads: Feature Distribution",
+       subtitle = "Over-representation in 'Successful' group = targeting signal",
+       x = "", y = "Proportion", fill = "") +
+  theme_minimal() +
+  theme(axis.text.x = element_text(angle = 45, hjust = 1, size = 8))
+```
+
+This table shows how frequently each attribute appears in successful MX leads versus Overall population of MX leads.
+The goal is to identify which characteristics are over-represented and associated with success and those that are under-represented and less likely to convert.
+
+-   Americas territory has a **53%** representation among all MX leads and has a **62%** representation of successfully converted MX leads.
+    Leads from America convert more often than expected.
+
+-   APAC and Oceania have a **21%** representation among all MX leads and a **14%** representation of all successful MX leads.
+    Companies in these regions convert less often.
+
+-   Medical device industry and Small Tier have similar distributions, **22%** representation among all MX leads and **27%** and **29%** representation among all successful MX leads respectively.
+
+-   Large Tier organizations have a really low representation.
+    These companies are less likely to convert.
+
+-   Manufacturing (site function) have a **21%** representation among all MX leads and a **35%** representation of all successful MX leads.
+    This can be a strong targeting signal.
+
+-   Non-Manufacturing or Low Info companies have a **47%** representation of all MX leads and a **27%** of all successful MX leads.
+    They have a higher representation, close to Americas territory, but convert significantly less.
+    Almost half as many convert.
+    This is also a strong negative signal.
+
+The bar plots faceted over features/characteristics shows the proportion of all MX leads and successful MX leads per characteristic, similar to the table above but in graph form.
+
+### ICP Cluster Summary
+
+```{r icp-summary}
+icp_summary <- mx_success %>%
+  group_by(icp_cluster) %>%
+  summarise(
+    n = n(),
+    pct_of_winners = round(100 * n() / nrow(mx_success), 1),
+    top_industry = names(sort(table(acct_target_industry), decreasing = TRUE))[1],
+    top_mfg = names(sort(table(mfg_model_group), decreasing = TRUE))[1],
+    top_site_fn = names(sort(table(site_function_group), decreasing = TRUE))[1],
+    top_tier = names(sort(table(acct_tier_rollup), decreasing = TRUE))[1],
+    top_territory = names(sort(table(acct_territory_rollup), decreasing = TRUE))[1],
+    top_channel = names(sort(table(last_tactic_campaign_channel), decreasing = TRUE))[1],
+    .groups = "drop"
+  )
+
+icp_summary
+```
+
+### Export Cluster Labels for Modeling
+
+```{r save-cluster-labels}
+saveRDS(
+  leads_clustered %>% select(qal_id, account_cluster, title_cluster),
+  "data/cluster_labels.rds"
+)
+saveRDS(
+  mx_leads %>% select(qal_id, mx_cluster),
+  "data/mx_cluster_labels.rds"
+)
+```
+
+**ICP summary:** The ideal MX customer is an Americas-based, small-to-medium, Pharma/BioTech or Medical Device company with an actual manufacturing function (not Non-Mfg/Low Info).
+The Non-Mfg/Low Info segment is the single biggest drag on MX conversion — it’s **47%** of all MX leads but significantly under-represented among successes.
+
+#### Business Translation
+
+Each ICP cluster is a data-driven Ideal Customer Profile for MX.
+The medoid archetype gives the sales team a concrete example: "This exact type of lead, with this title, at this type of company, arriving via this channel, converted." The comparison chart shows which attributes are over-represented among winners relative to all MX leads — these are the attributes to prioritize in targeting.
+If **60%** of current MX leads match no ICP cluster, that quantifies the targeting waste and the opportunity for improvement.
+
+## Results Overview Summary
+
+**Data Problems:**
+
+-   Missing data was not random and has a pattern; ‘Low Info’ records represent incomplete enrichment or lead source characteristics and should be treated as predictive signals rather than removed from the dataset.
+
+-   Missing site/manufacturing was found to most likely come from small tier, which contracts our Ideal Customer Profile Cluster analysis which states small-to-medium tier is best.
+    This will be further analyzed when we perform modeling on the dataset to gain firmer confirmation.
+
+-   High variability in job titles created noise; standardizing titles and using bi-grams improved feature clarity and reduced job title complexity for modeling.
+
+-   We are grouping these leads together and should be treated as a signal rather than these be excluded from the analysis.
+
+-   As stated in the analysis, ‘Missing Info or Low Info’ leads pattern is telling us something about the lead itself and how it entered the system.
+    In practice, missing enrichment can be treated like a warning sign that the lead may be lower quality or less well-qualified, or that the channel/source collects less complete information.
+
+**Strong Relationship Identified:**
+
+-   Industry alignment and manufacturing site function show the strongest relationship with MX conversion, particularly Pharma/Bio Tech and Medical Device organizations with operational manufacturing relevance.
+
+-   ‘Low Info’ groups leading to a low conversion rate are a strong negative indicator.
+
+**Structural Patterns from Clustering:**
+
+-   Successful leads are relatively homogeneous (ow silhouette score of .1) suggesting a consistent ideal customer profile (ICP) rather than multiple distinct ideal customer profile subgroups.
+
+-   The ideal MX customer profile is clear; Americas-based, small-to-medium, Pharma/Bio Tech or Medical Device companies.
+
+**Impact on Analytics Approach:**
+
+-   Targeting the right job title matters as much as targeting the right company/industry.
+
+-   Job title and industry will be the key components in our analytic approach to ensure we are targeting leads that are most likely to convert.
+
+-   Missing/Low Info indicators will be retained allowing models to learn relationships between enrichment quality and conversion outcomes.
+
+-   During modeling, looking we include Small Tier companies and their likelihood of converting to ensure consistency.
