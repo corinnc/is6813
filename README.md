@@ -7,7 +7,7 @@
 
 MasterControl's MX product (Manufacturing Solutions) converts leads at 12.7%, significantly below its QX product at 19.7%. This project analyzed 16,644 historical QAL (Qualified Account Lead) records spanning January 2024 through December 2025 to identify which account profiles and contact characteristics drive higher MX conversion and to build a model that scores and ranks individual leads by their likelihood of success.
 
-The goal: help MasterControl Sales and Marketing focus their resources on the leads most likely to progress to SQL, SQO, or Won.
+The goal: Help MasterControl Sales and Marketing focus their resources on the leads most likely to progress to SQL, SQO, or Won.
 
 ## What We Found
 
@@ -46,7 +46,7 @@ We compared six classification models. The Explainable Boosting Machine (EBM) wa
 
 Unlike black-box models, the EBM produces a shape function for each feature, meaning Sales can understand exactly why any individual lead scored high or low.
 
-## Ideal Customer Profile
+## Ideal Customer Profile -- Corinn Contribution
 
 Based on the EBM model, here is who MasterControl should prioritize and deprioritize for MX outreach:
 
@@ -61,7 +61,7 @@ Based on the EBM model, here is who MasterControl should prioritize and depriori
 
 **Note on job titles:** QA Directors and Quality Specialists are not bad leads — they are likely strong fits for QX. We recommend rerouting them rather than discarding them, turning an MX loss into a QX opportunity.
 
-## Business Value
+## Business Value -- Corinn Contribution
 
 To illustrate the model's practical utility, we scored two hypothetical leads:
 
@@ -71,6 +71,23 @@ To illustrate the model's practical utility, we scored two hypothetical leads:
 At a 0.10 probability threshold, the model identifies approximately 105 conversions per 1,000 leads pursued. At an average MX contract value of $70,000, that represents roughly $7.3 million in expected lifetime revenue per 1,000 leads, with outreach costs that are almost negligible in comparison even at $1,000 per lead.
 
 Increasing the MX progression rate from 12.7% to 16-18% would represent a ~50% improvement in MX sales success and meaningfully close the gap with QX.
+
+<img src="https://github.com/corinnc/is6813/blob/main/cost_table.png" width="450">
+
+## Personal Contribution
+My contributions to this project were:
+- EDA: During EDA, I added summaries of each cluster plot and ensured consistency across the final documentation.
+- Modeling: Because the EBM was the best-performing model, I used the EBM shape function scores of each category to create the 'Ideal Customer Profile'. To see this model in action, I used the Ideal Customer Profile and crafted two hypothetical scenarios and ran these two leads into our model to get the conversion probabilities of each lead. Continuing with hypothetical scenarios, I generated an estimated cost table showing the economic value of deploying the EBM model at different probabilities and estimated cost thresholds to find the maximum net value at each threshold. This shows the business impact of deploying the EBM model.
+
+## Difficulties Encountered
+- Data Cleaning: During the EDA process, there were a lot of missing or low info values for leads that made the data hard to interpret. There were also many inconsistencies in job titles and industry labels that needed standardization for further analysis.
+- EDA: The clustering analysis during EDA had hard-to-interpret plots and charts that made it difficult to immediately interpret for the end user. 
+
+## What I Learned
+After performing predictive modeling across numerous assignments, applying those concepts and logic to a real-world business use case is always beneficial and a new learning experience. I learned how to use business analytics methods from start to finish and how to convey analysis in a business context to stakeholders. Beyond building predictive models, incorporating profit-and-loss figures and using the model to run hypothetical scenarios — as if the data had just been ingested for business use — tied the whole project together and gave us a real sense of how these analyses play out in practice. Presenting our findings directly to our stakeholders helped us see the bigger picture, and I believe that portion of the project benefited me the most.
+
+## Link to Group Project Repo
+https://github.com/gabyr93/Group-Project-Master-Control
 
 ## Tools
 
