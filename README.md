@@ -68,7 +68,7 @@ To illustrate the model's practical utility, we scored two hypothetical leads:
 - **Sarah** (Production Manager, Medical Device, Americas, P1 - Contact Us, SEO): **97.2%** predicted conversion probability — 7.52x above baseline
 - **David** (QA Director, Unknown industry, APAC, No Priority, Online Ads): **2.5%** predicted conversion probability — 0.19x baseline
 
-At a 0.10 probability threshold, the model identifies approximately 105 conversions per 1,000 leads pursued. At an average MX contract value of $70,000, that represents over $7 million in expected lifetime revenue per 1,000 leads, with outreach costs that are almost negligible in comparison even at $1,000 outreach cost per pursued lead.
+At a 0.10 probability threshold, the model identifies approximately 105 conversions per 1,000 leads pursued. At an average MX contract value of $70,000, that represents over $7 million in expected lifetime revenue per 1,000 leads, with outreach costs that are almost negligible in comparison, even at a $1,000 outreach cost per pursued lead.
 
 Increasing the MX progression rate from 12.7% to 16-18% would represent a ~50% improvement in MX sales success and meaningfully close the gap with QX.
 
@@ -80,8 +80,9 @@ My contributions to this project were:
 - Modeling: Because the EBM was the best-performing model, I used the EBM shape function scores of each category to create the 'Ideal Customer Profile'. To see this model in action, I used the Ideal Customer Profile and crafted two hypothetical scenarios and ran these two leads into our model to get the conversion probabilities of each lead. Continuing with hypothetical scenarios, I generated an estimated cost table showing the economic value of deploying the EBM model at different probabilities and estimated cost thresholds to find the maximum net value at each threshold. This shows the business impact of deploying the EBM model.
 
 ## Difficulties Encountered
-- Data Cleaning: During the EDA process, there were a lot of missing or low info values for leads that made the data hard to interpret. There were also many inconsistencies in job titles and industry labels that needed standardization for further analysis.
-- EDA: The clustering analysis during EDA had hard-to-interpret plots and charts that made it difficult to immediately interpret for the end user. 
+- Data Cleaning: During the EDA process, there were a lot of missing or low info values for leads that made the data hard to interpret. We were unsure what to do with these leads, whether to input data, drop them completely, or use them as a signal towards conversion. There were also many inconsistencies in job titles and industry labels that needed standardization for further analysis.
+- EDA: The clustering analysis during EDA had hard-to-interpret plots and charts that made it difficult to immediately interpret for the end user.
+- Modeling: The preprocessing steps of our dataset were the difficult part of starting the modeling analysis.
 
 ## What I Learned
 After performing predictive modeling across numerous assignments, applying those concepts and logic to a real-world business use case is always beneficial and a new learning experience. I learned how to use business analytics methods from start to finish and how to convey analysis in a business context to stakeholders. Beyond building predictive models, incorporating profit-and-loss figures and using the model to run hypothetical scenarios — as if the data had just been ingested for business use — tied the whole project together and gave us a real sense of how these analyses play out in practice. A key takeaway was recognizing how a tool like this extends beyond a single team. The ideal customer profile and lead routing recommendations we developed have direct implications for sales, marketing, and customer success — each team can use the model's outputs to prioritize efforts, allocate budget, and tailor outreach strategies to the right prospects. Presenting our findings directly to our stakeholders helped us see the bigger picture, and I believe that portion of the project benefited me the most.
